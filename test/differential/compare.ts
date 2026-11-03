@@ -3,7 +3,13 @@
 
 const num = (v: unknown): number | null => (typeof v === 'number' ? v : typeof v === 'bigint' ? Number(v) : null);
 
+/**
+ * smaltdf's value `a` against Polars' `b`. smaltdb has no NaN, so where Polars gives NaN (an undefined statistic, a
+ * math function outside its domain) smaltdf gives NULL: the documented `nan-is-null` divergence, and the only case
+ * where unequal values match.
+ */
 export function sameValue(a: unknown, b: unknown): boolean {
+  if (b === 'nan') return a === null;
   const x = num(a);
   const y = num(b);
   if (x !== null && y !== null) return x === y || Math.abs(x - y) <= 1e-9 * Math.max(1, Math.abs(x), Math.abs(y));

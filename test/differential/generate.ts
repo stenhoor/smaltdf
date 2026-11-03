@@ -121,6 +121,21 @@ export function cases(seed: number, n: number): Case[] {
     }
   };
 
+  /** A statistics aggregate (smaltdb's var_samp, stddev_pop, median, percentile_cont, …) of a numeric column. */
+  const statAgg = (name: string): E => {
+    const on: E = { col: pick(['i1', 'f1', 'i2']) };
+    const e: E = pick<() => E>([
+      () => ({ call: pick(['var', 'std']), on, kwargs: { ddof: pick([0, 1, 2]) } }),
+      () => ({ call: 'median', on }),
+      () => ({ call: 'quantile', on, args: [pick([0, 0.1, 0.25, 0.5, 0.9, 1])], kwargs: { interpolation: pick(['linear', 'lower']) } }),
+      () => ({ call: 'skew', on, kwargs: { bias: r() < 0.5 } }),
+      () => ({ call: 'kurtosis', on, kwargs: { bias: r() < 0.5, fisher: r() < 0.5 } }),
+      () => ({ fn: 'corr', args: [{ col: 'f1' }, { col: pick(['i1', 'i2']) }] }),
+      () => ({ fn: 'cov', args: [{ col: 'f1' }, { col: pick(['i1', 'i2']) }], kwargs: { ddof: pick([0, 1]) } }),
+    ])();
+    return { call: 'alias', on: e, args: [name] };
+  };
+
   const out: Case[] = [];
   for (let k = 0; k < n; k++) {
     const ops: Op[] = [];
@@ -150,6 +165,8 @@ export function cases(seed: number, n: number): Case[] {
               { call: 'alias', on: { call: 'count', on: { col: pick(['i1', 'f1', 's1']) } }, args: ['c'] },
               { call: 'alias', on: { call: 'n_unique', on: { col: pick(['i1', 's1']) } }, args: ['u'] },
               { fn: 'len' },
+              statAgg('st'),
+              statAgg('st2'),
             ],
           });
           grouped = true;
@@ -167,6 +184,11 @@ export function cases(seed: number, n: number): Case[] {
           ops.push({ op: 'with_columns', args: [{ call: 'alias', on: { call: 'rank', on: { col: pick(['i1', 'f1', 'i2']) }, args: [pick(['average', 'min', 'max', 'dense'])], kwargs: { descending: r() < 0.5 } }, args: ['r'] }] });
           break;
         default:
+          if (r() < 0.4) {
+            const st = statAgg('ws');
+            ops.push({ op: 'with_columns', args: [r() < 0.5 ? st : { call: 'alias', on: { call: 'over', on: (st as { on: E }).on, args: ['b1'] }, args: ['ws'] }] });
+            break;
+          }
           ops.push({ op: 'with_columns', args: [{ call: 'alias', on: { call: pick(['sum', 'max', 'min', 'count']), on: { col: 'i2' } }, args: ['w'] }, { call: 'alias', on: { call: 'over', on: { call: 'max', on: { col: 'i2' } }, args: ['b1'] }, args: ['wo'] }] });
       }
     }

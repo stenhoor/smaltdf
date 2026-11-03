@@ -27,7 +27,5 @@ Its API follows the Polars expression API, and every operation runs in the smalt
 
 ## Open items
 
-- Map `std`, `var`, `median` and `quantile` onto smaltdb's statistics aggregates when they land, and drop the
-  temporary `var()` formula (decision 4).
 - Date/time and list types.
 - The worker plugin (decision 3) is not needed yet: v0.1 runs entirely as SQL.

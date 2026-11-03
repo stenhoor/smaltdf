@@ -3,7 +3,7 @@
 // not (smaltdb flattens those again: `SELECT … FROM (SELECT …) WHERE …` runs as one fused scan).
 //
 // Literals are bound as numbered parameters (`?1`, `?2`, …), so the text of a statement depends only on its shape.
-import { Boolean as Bool, Float64, Int64, Null, String as Str, Unknown, type DataType, type Schema } from './dtypes.js';
+import { Binary, Boolean as Bool, Float64, Int64, Null, String as Str, Unknown, type DataType, type Schema } from './dtypes.js';
 import { SmaltdfError, needsEngine } from './errors.js';
 import type { Node } from './expr.js';
 import type { Plan } from './plan.js';
@@ -180,11 +180,35 @@ function compileAgg(n: Extract<Node, { k: 'agg' }>, c: Ctx): string {
     case 'n_unique':
       if (over) throw needsEngine('nUnique() over a window', 'DISTINCT in window aggregates');
       return `(count(DISTINCT ${x}) + (count(${x}) < count(*)))`;
-    case 'var': {
-      const y = `CAST(${x} AS REAL)`;
-      const s = call(`sum(${y})`);
+    case 'var':
+    case 'std': {
+      const d = n.ddof ?? 1;
+      const sq = n.fn === 'std' ? 'stddev' : 'var';
+      if (d === 1 || d === 0) return call(`${sq}_${d === 1 ? 'samp' : 'pop'}(${x})`);
+      // Polars' ddof: the population variance scaled by n / (n - ddof); NULL unless n > ddof.
       const k = call(`count(${x})`);
-      return `((${call(`sum(${y} * ${y})`)} - ${s} * ${s} / ${k}) / (${k} - ${n.ddof ?? 1}))`;
+      const v = `(${call(`var_pop(${x})`)} * ${k} / (${k} - ${d}))`;
+      const val = n.fn === 'std' ? `sqrt(${v})` : v;
+      return `(CASE WHEN ${k} > ${d} THEN ${val} END)`;
+    }
+    case 'median':
+      return call(`median(${x})`);
+    case 'quantile':
+      return call(`${n.interpolation === 'lower' ? 'percentile_disc' : 'percentile_cont'}(${x}, ${c.params.add(n.quantile!)})`);
+    case 'skew':
+      return call(`skewness${n.bias ? '_pop' : ''}(${x})`);
+    case 'kurtosis': {
+      const k = call(`kurtosis${n.bias ? '_pop' : ''}(${x})`);
+      return n.fisher ? k : `(${k} + 3)`;
+    }
+    case 'corr':
+      return call(`corr(${x}, ${compileExpr(n.y!, c)})`);
+    case 'cov': {
+      const d = n.ddof ?? 1;
+      const y = compileExpr(n.y!, c);
+      if (d === 1 || d === 0) return call(`covar_${d === 1 ? 'samp' : 'pop'}(${x}, ${y})`);
+      const k = call(`count(${x} + ${y})`);
+      return `(CASE WHEN ${k} > ${d} THEN ${call(`covar_pop(${x}, ${y})`)} * ${k} / (${k} - ${d}) END)`;
     }
   }
 }
@@ -240,7 +264,7 @@ function children(n: Node): Node[] {
     case 'fn':
       return n.args;
     case 'agg':
-      return n.x ? [n.x] : [];
+      return [...(n.x ? [n.x] : []), ...(n.y ? [n.y] : [])];
     case 'case':
       return [...n.whens.flat(), ...(n.otherwise ? [n.otherwise] : [])];
     case 'over':
@@ -296,7 +320,7 @@ function substitute(n: Node, name: string): Node {
     case 'fn':
       return { ...n, args: n.args.map((a) => substitute(a, name)) };
     case 'agg':
-      return { ...n, x: n.x && substitute(n.x, name) };
+      return { ...n, x: n.x && substitute(n.x, name), y: n.y && substitute(n.y, name) };
     case 'case':
       return { ...n, whens: n.whens.map(([w, t]) => [substitute(w, name), substitute(t, name)] as [Node, Node]), otherwise: n.otherwise && substitute(n.otherwise, name) };
     case 'over':
@@ -346,6 +370,13 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
       switch (n.fn) {
         case 'mean':
         case 'var':
+        case 'std':
+        case 'median':
+        case 'quantile':
+        case 'skew':
+        case 'kurtosis':
+        case 'corr':
+        case 'cov':
           return Float64;
         case 'count':
         case 'len':
@@ -395,7 +426,7 @@ export function litType(v: LitValue): DataType {
   if (typeof v === 'bigint') return Int64;
   if (typeof v === 'number') return Number.isInteger(v) ? Int64 : Float64;
   if (typeof v === 'string') return Str;
-  return { name: 'Binary', sql: 'BLOB' } as DataType;
+  return Binary;
 }
 
 // ------------------------------------------------------------------ query blocks

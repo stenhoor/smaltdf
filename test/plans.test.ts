@@ -8,6 +8,7 @@ describe('query plans', () => {
   const cases = {
     'filter + select + sort': (pl: ReturnType<typeof setup>['pl']) => pl.scanTable('orders').filter(col('qty').gt(1)).select('id', col('qty').mul(col('price')).alias('t')).sort('t'),
     'withColumns + groupBy + sort': (pl: ReturnType<typeof setup>['pl']) => pl.scanTable('orders').filter(col('qty').gt(0)).withColumns(col('qty').mul(col('price')).alias('revenue')).groupBy('region').agg(col('revenue').sum(), len()).sort('revenue', { descending: true }),
+    'groupBy with statistics': (pl: ReturnType<typeof setup>['pl']) => pl.scanTable('orders').filter(col('qty').gt(0)).groupBy('region').agg(col('price').std(), col('price').median().alias('m'), col('price').quantile(0.9, 'linear').alias('p90')),
     'filter + filter + head': (pl: ReturnType<typeof setup>['pl']) => pl.scanTable('orders').filter(col('qty').gt(0)).filter(col('region').ne('east')).head(2),
   };
   for (const [name, build] of Object.entries(cases)) {

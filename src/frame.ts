@@ -280,7 +280,10 @@ export class DataFrame implements DataSource {
     for (const [name, values] of Object.entries(data)) {
       if (height >= 0 && values.length !== height) throw new SmaltdfError('ShapeError', `column ${JSON.stringify(name)} has ${values.length} values, expected ${height}`);
       height = values.length;
-      const column: Column = values instanceof Float64Array ? values : (Array.from(values, normalize) as SqlValue[]);
+      const declared = schema?.[name];
+      let column: Column = values instanceof Float64Array ? values : (Array.from(values, normalize) as SqlValue[]);
+      // An Int64 column keeps integers beyond 2^53 exact: they are stored as bigint.
+      if (declared === Int64) column = Array.from(column as ArrayLike<SqlValue>, (v) => (typeof v === 'number' && Number.isInteger(v) && !Number.isSafeInteger(v) ? BigInt(v) : v));
       cols.set(name, column);
       types.set(name, schema?.[name] ?? inferType(column));
     }
@@ -466,7 +469,8 @@ export class GroupBy {
 }
 
 function normalize(v: unknown): SqlValue | boolean {
-  if (v === undefined || v === null) return null;
+  // smaltdb has no NaN: it is stored as NULL (docs/divergences.md, "nan-input").
+  if (v === undefined || v === null || (typeof v === 'number' && Number.isNaN(v))) return null;
   if (typeof v === 'number' || typeof v === 'string' || typeof v === 'bigint' || typeof v === 'boolean' || v instanceof Uint8Array) return v;
   if (v instanceof Date) return v.toISOString();
   throw new SmaltdfError('SchemaError', `unsupported value ${String(v)}: use numbers, bigints, strings, booleans, Uint8Arrays or null`);

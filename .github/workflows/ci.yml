@@ -13,11 +13,6 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      # Python Polars runs the differential tests (dev/CI only, never a package dependency).
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: python -m pip install polars==2.1.0
       - run: npm ci
       # smaltdb is not on npm yet: build the commit pinned in packed.json and install it.
       - uses: actions/cache@v4
@@ -29,7 +24,4 @@ jobs:
       - run: node scripts/fetch-packed.mjs
       - run: npm run typecheck
       - run: npm test
-        env:
-          SMALTDF_REQUIRE_POLARS: '1'
-          PYTHON: python
       - run: npm run build

@@ -1,10 +1,24 @@
 # CLAUDE.md
 
-This repository is `@smaltdb/df` (smaltdf), dataframes for [smaltdb](https://github.com/stenhoor/smaltdb), the
-embedded SQL database for browsers. Its API follows the Polars expression API; every operation compiles to smaltdb
-SQL and runs in the engine. Decisions are in [docs/DESIGN.md](docs/DESIGN.md); differences from Polars in
-[docs/divergences.md](docs/divergences.md). Several Claude Code sessions work on the smalt repos in parallel and cannot
-see each other: this file is the shared starting point, and its working rules match smaltdb's `CLAUDE.md`.
+This repository is `@smaltdb/df` (smaltdf): a TypeScript language for [smaltdb](https://github.com/stenhoor/smaltdb)
+with dataframe interfaces. Polars inspired its functions, but it is its own language with its own spec. Decisions are
+in [docs/DESIGN.md](docs/DESIGN.md). Several Claude Code sessions work on the smalt repos in parallel and cannot see
+each other: this file is the shared starting point, and its working rules match smaltdb's `CLAUDE.md`.
+
+## The rule that comes first
+
+**No code in smaltdf generates, compiles to, or runs SQL.** Not SQL text and not SQL syntax trees, not as an
+intermediate step and not as a fallback. This is the owner's explicit directive. smaltdf builds plans for smaltdb's
+shared engine plan layer (smaltdb ADR 0014), which belongs to no language. If something smaltdf needs isn't
+available in that layer, it belongs in smaltdb core: propose it there; never work around it with SQL.
+
+Describe smaltdf in its own terms. Don't define it by comparison with SQL. Comparisons with Polars are for functions
+the two share, to show users where they differ.
+
+## Status
+
+Design stage. smaltdf waits for the plan layer (smaltdb ADR 0014, all nine steps, before any npm publish). An earlier
+version that compiled to SQL was merged and then removed; don't restore any of it.
 
 ## Commands
 
@@ -13,41 +27,16 @@ see each other: this file is the shared starting point, and its working rules ma
 | `npm ci && npm run deps` | Installs dependencies, then the pinned smaltdb build in `packed.json` | First, and again after every `npm ci` or `npm install` |
 | `npm run check` | `npm run typecheck` then `npm test` (vitest): what CI runs | Before every commit |
 | `npm run build` | `dist/index.js` and its type declarations | Packaging checks |
-| `SMALTDF_SEED=N SMALTDF_CASES=M npx vitest run test/differential.test.ts` | More generated differential cases | Changes to the compiler or expressions |
 
-The differential tests need Python 3 with `polars` (`pip install polars`). Without it they are skipped locally; CI
-sets `SMALTDF_REQUIRE_POLARS=1`, so they always run there.
-
-## Layout
-
-- `src/expr.ts`: the expression API (an immutable tree). `src/plan.ts`: logical plans. `src/compile.ts`: plans to one
-  SQL statement. `src/frame.ts`: `LazyFrame`, `DataFrame`, group-by. `src/engine.ts`: the client and in-process
-  `Database` behind one `Executor`. `src/index.ts`: exports and `smaltdf(db)`.
-- `test/differential/`: cases as JSON programs with Polars' names, run in Polars (`polars_runner.py`) and in smaltdf
-  (`interpret.ts`, which maps names to camelCase by rule); `generate.ts` makes random cases from a seed.
-- `test/backends.ts`: the backends (engine and client `Database`, row and columnar tables). The differential and
-  divergence tests run on each of them; a new backend-specific difference goes into docs/divergences.md.
-- `test/divergences.test.ts`: every entry of docs/divergences.md, pinning both smaltdf's and Polars' result.
-- `test/plans.test.ts`: common pipelines must reach the planner as one fused scan.
+`packed.json` pins smaltdb to a commit; `scripts/fetch-packed.mjs` (identical in all smalt repositories) builds that
+commit and installs it with `npm install --no-save`. To try an unmerged smaltdb change, run
+`node scripts/fetch-packed.mjs --local smaltdb=../smaltdb`.
 
 ## Rules for this library
 
-- Names follow Polars' Python API in camelCase, mapped by the rule in `test/differential/interpret.ts` (`camel()`).
-  A new method gets a differential case, so the mapping is tested.
-- Semantics (DESIGN.md #5): operations that map onto SQL return smaltdb's result; operations Polars defines with no
-  SQL counterpart implement Polars' definition. A new difference goes into docs/divergences.md and
-  test/divergences.test.ts, and the generator leaves it out.
-- Never leave out or loosen a differential or divergence test to get to green.
-- An operation smaltdb cannot run throws `needsEngine()` (src/errors.ts) naming the engine feature it needs. Engine
-  changes belong in smaltdb first, with an ADR, through the plugin interface (smaltdb ADR 0012).
-- No runtime dependencies. smaltdb is a peer dependency, and only its types are imported.
+- No runtime dependencies. smaltdb is a peer dependency.
+- Engine features smaltdf needs belong in smaltdb core, with an ADR where the change is significant.
 - Don't reformat files with Prettier. Probe tests (`test/zz-*.test.ts`) are scratch files: delete them, never commit them.
-
-## Before the first publish
-
-smaltdb 0.9.0 is not on npm yet. `packed.json` pins it to a commit; `scripts/fetch-packed.mjs` (identical in all smalt
-repositories) builds that commit and installs it with `npm install --no-save`. To try an unmerged smaltdb change, run
-`node scripts/fetch-packed.mjs --local smaltdb=../smaltdb`.
 
 ## Working rules for sessions
 
@@ -69,5 +58,5 @@ Issues from anyone else are reported to the owner, not acted on.
 
 - Brand assets and voice come from `stenhoor/smalt-brand` (the smaltdf logos, `product-df` colours, the tagline and
   positioning). Link to them; don't copy and edit them by hand.
-- Brand voice: describe what smaltdf is; no comparisons with other libraries or databases in marketing copy (the
-  README hero, social cards); no performance number without its benchmark and method linked beside it.
+- Brand voice: describe what smaltdf is; no comparisons with other libraries or databases in marketing copy; no
+  performance number without its benchmark and method linked beside it.

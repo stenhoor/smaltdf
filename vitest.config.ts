@@ -16,5 +16,6 @@ export default defineConfig({
     ],
   },
   server: { deps: { inline: [/node_modules\/smaltdb\//] } },
-  test: { include: ['test/**/*.test.ts'] },
+  // No tests until the language exists (docs/DESIGN.md).
+  test: { include: ['test/**/*.test.ts'], passWithNoTests: true },
 });

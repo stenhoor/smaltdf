@@ -3,7 +3,7 @@
 // not (smaltdb flattens those again: `SELECT … FROM (SELECT …) WHERE …` runs as one fused scan).
 //
 // Literals are bound as numbered parameters (`?1`, `?2`, …), so the text of a statement depends only on its shape.
-import { Boolean as Bool, Float64, Int64, Null, String as Str, Unknown, type DataType, type Schema } from './dtypes.js';
+import { Binary, Boolean as Bool, Float64, Int64, Null, String as Str, Unknown, type DataType, type Schema } from './dtypes.js';
 import { SmaltdfError, needsEngine } from './errors.js';
 import type { Node } from './expr.js';
 import type { Plan } from './plan.js';
@@ -395,7 +395,7 @@ export function litType(v: LitValue): DataType {
   if (typeof v === 'bigint') return Int64;
   if (typeof v === 'number') return Number.isInteger(v) ? Int64 : Float64;
   if (typeof v === 'string') return Str;
-  return { name: 'Binary', sql: 'BLOB' } as DataType;
+  return Binary;
 }
 
 // ------------------------------------------------------------------ query blocks

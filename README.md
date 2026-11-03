@@ -83,9 +83,11 @@ The API follows the Polars expression API. Method and argument names are Polars'
 and output column names follow the same rules.
 
 Results are checked against Python Polars by differential tests: generated programs run in both, and their results
-must match. Where an operation maps onto SQL, smaltdf returns what smaltdb's SQL returns. The differences are listed,
-with portable forms, in [docs/divergences.md](docs/divergences.md). Examples: integer `truediv` truncates, `round`
-rounds halves away from zero, and `sum()` of no values is NULL.
+must match. They run on every backend (the in-process engine and the worker client, each with row and columnar
+tables, and JavaScript data), and give the same results on all of them. Where an operation maps onto SQL, smaltdf
+returns what smaltdb's SQL returns. The differences are listed, with portable forms, in
+[docs/divergences.md](docs/divergences.md). Examples: integer `truediv` truncates, `round` rounds halves away from
+zero, `sum()` of no values is NULL, and `pl.DataFrame({ x: [1.0, 2.0] })` is `Int64` unless a schema says `Float64`.
 
 ## Development
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { Float64, Int64, String as Str, col, len, lit, when } from '../src/index.js';
+import { Binary, Float64, Int64, String as Str, col, len, lit, when } from '../src/index.js';
 import { setup, sorted } from './helpers.js';
 
 describe('LazyFrame', () => {
@@ -123,5 +123,31 @@ describe('LazyFrame', () => {
     await expect(pl.scanTable('orders').select('id', col('qty').alias('id')).collect()).rejects.toMatchObject({ kind: 'DuplicateError' });
     expect(() => col('a').std()).toThrow(/statistics aggregates/);
     await expect(pl.scanTable('orders').groupBy('region').agg(col('qty')).collect()).rejects.toMatchObject({ kind: 'InvalidOperationError' });
+  });
+
+  test('JavaScript data: types inferred from values, NaN, large integers, empty columns (docs/divergences.md)', async () => {
+    const { pl } = setup();
+    // 1.0 is the integer 1 in JavaScript, so the column is Int64 unless a schema says otherwise.
+    const ints = pl.DataFrame({ x: [1.0, 2.0] });
+    expect(ints.dtypes).toEqual([Int64]);
+    expect((await ints.select(col('x').truediv(2))).getColumn('x')).toEqual(new Float64Array([0, 1]));
+    const floats = pl.DataFrame({ x: [1.0, 2.0] }, { schema: { x: Float64 } });
+    expect((await floats.select(col('x').truediv(2))).getColumn('x')).toEqual(new Float64Array([0.5, 1]));
+    expect(pl.DataFrame({ x: new Float64Array([1, 2.5]) }).dtypes).toEqual([Float64]);
+    // NaN is stored as NULL.
+    const nan = await pl.DataFrame({ f: [NaN, 1.5] }).select(col('f').isNull().alias('n'), col('f').sum().alias('s'));
+    expect(nan.toDicts()).toEqual([{ n: true, s: 1.5 }, { n: false, s: 1.5 }]);
+    // Integers beyond 2^53 stay exact as bigint (an Int64 schema turns unsafe integer numbers into bigint).
+    const big = await pl.DataFrame({ i: [2n ** 62n + 1n, 1n] }).select(col('i').add(1));
+    expect(big.getColumn('i')).toEqual([2n ** 62n + 2n, 2]);
+    expect((await pl.DataFrame({ i: [2 ** 62] }, { schema: { i: Int64 } }).select('i')).getColumn('i')).toEqual([2n ** 62n]);
+    // Binary columns, and an empty result's columns (a Float64Array of length 0, whatever the type).
+    const bin = pl.DataFrame({ b: [new Uint8Array([1, 2]), null] });
+    expect(bin.dtypes).toEqual([Binary]);
+    expect((await bin.filter(col('b').isNotNull())).getColumn('b')).toEqual([new Uint8Array([1, 2])]);
+    const empty = await pl.scanTable('orders').filter(col('id').gt(99)).select('region').collect();
+    expect(empty.shape).toEqual([0, 1]);
+    expect(empty.getColumn('region')).toEqual(new Float64Array(0));
+    expect(empty.dtypes).toEqual([Str]);
   });
 });

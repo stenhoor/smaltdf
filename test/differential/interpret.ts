@@ -75,9 +75,12 @@ function frame(p: Bound, spec: FrameSpec): LazyFrame {
   return p.DataFrame(spec.columns as Record<string, unknown[]>, { schema }).lazy();
 }
 
-export async function run(p: Bound, c: Case): Promise<{ columns: string[]; rows: unknown[][] }> {
-  let lf = frame(p, c.data);
-  const others = Object.fromEntries(Object.entries(c.frames ?? {}).map(([k, v]) => [k, frame(p, v)]));
+/** Run a case. `load` places a frame's data (default: a DataFrame from JavaScript, in a temporary table). */
+export async function run(p: Bound, c: Case, load?: (spec: FrameSpec) => Promise<LazyFrame>): Promise<{ columns: string[]; rows: unknown[][] }> {
+  const place = load ?? (async (spec: FrameSpec) => frame(p, spec));
+  let lf = await place(c.data);
+  const others: Record<string, LazyFrame> = {};
+  for (const [k, v] of Object.entries(c.frames ?? {})) others[k] = await place(v);
   for (const op of c.ops) {
     if (op.op === 'group_by_agg') {
       const g = op as Extract<Op, { op: 'group_by_agg' }>;

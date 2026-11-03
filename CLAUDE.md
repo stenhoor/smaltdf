@@ -25,6 +25,8 @@ sets `SMALTDF_REQUIRE_POLARS=1`, so they always run there.
   `Database` behind one `Executor`. `src/index.ts`: exports and `smaltdf(db)`.
 - `test/differential/`: cases as JSON programs with Polars' names, run in Polars (`polars_runner.py`) and in smaltdf
   (`interpret.ts`, which maps names to camelCase by rule); `generate.ts` makes random cases from a seed.
+- `test/backends.ts`: the backends (engine and client `Database`, row and columnar tables). The differential and
+  divergence tests run on each of them; a new backend-specific difference goes into docs/divergences.md.
 - `test/divergences.test.ts`: every entry of docs/divergences.md, pinning both smaltdf's and Polars' result.
 - `test/plans.test.ts`: common pipelines must reach the planner as one fused scan.
 

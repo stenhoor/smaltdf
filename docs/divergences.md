@@ -17,6 +17,7 @@ differential tests (`test/differential.test.ts`) leave these operations out.
 | `sum-of-nothing` | `sum()` over no rows, or over only NULLs | NULL | `0` | `col('a').sum().fillNull(0)` |
 | `sort-nulls-default` | `sort(…)` without `nullsLast` | NULLs first when ascending, last when descending. | NULLs first in both directions. | Pass `nullsLast` explicitly: smaltdf then matches Polars. |
 | `cast-text-to-number` | `col('s').cast(Int64)` on text that is not a number | `0` (SQL `CAST`) | An error (`InvalidOperationError`); NULL with `strict=False` | — |
+| `nan-is-null` | Math functions outside their domain: `sqrt(-1)`, `log(0)`, `arcsin(2)` | NULL | `NaN`, or `-inf` for `log(0)` | Filter or `when` on the argument's domain. |
 | `unsigned-lengths` | `str.lenChars()`, `str.lenBytes()` | `Int64`: arithmetic can go below zero. | `UInt32`: arithmetic below zero wraps around. | `str.lenChars().cast(Int64)` in Polars gives smaltdf's result. |
 
 ## Representation
@@ -32,6 +33,6 @@ These are not differences in results, but in how values are held:
 ## Not supported yet
 
 These fail with `InvalidOperationError`, naming the engine feature they need (see the open items in
-[DESIGN.md](DESIGN.md)): `sqrt`, `pow` with a non-integer exponent, `std`, `median`, `quantile`, `first`, `last`,
+[DESIGN.md](DESIGN.md)): `std`, `median` and `quantile` (smaltdb's statistics aggregates, in progress), `first`, `last`,
 regular-expression patterns in `str.contains` / `str.replace` / `str.replaceAll` (literal patterns work), `nUnique()`
 over a window, `unique(keep=…)` other than `'any'`, and `maintainOrder`.

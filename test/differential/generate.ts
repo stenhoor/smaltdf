@@ -53,7 +53,20 @@ export function cases(seed: number, n: number): Case[] {
   const num = (d: number): E => {
     const t: T = r() < 0.6 ? 'int' : 'float';
     if (d <= 0 || r() < 0.3) return r() < 0.8 ? colOf(t) : { lit: int(-3, 3) };
-    switch (int(0, 6)) {
+    switch (int(0, 8)) {
+      case 7:
+        // Math functions on arguments inside their domain (NaN and -inf results differ: docs/divergences.md).
+        return pick([
+          () => call('sqrt', call('abs', num(d - 1))),
+          () => call(pick(['sin', 'cos', 'arctan', 'tanh', 'sinh', 'arcsinh', 'degrees', 'radians']), num(d - 1)),
+          () => call('exp', call('clip', num(d - 1), { lit: -5 }, { lit: 5 })),
+          () => call(pick(['log', 'log10']), call('add', call('abs', num(d - 1)), { lit: 1 })),
+          () => ({ call: 'log', on: call('add', call('abs', num(d - 1)), { lit: 1 }), args: [2] }),
+          () => call('pow', call('abs', num(d - 1)), { lit: pick([0, 1, 2, 3, 0.5]) }),
+          () => call(pick(['floor', 'ceil']), num(d - 1)),
+        ])();
+      case 8:
+        return call('floordiv', num(d - 1), { lit: pick([1, 2, 3, -2]) });
       case 0:
         return call(pick(['add', 'sub', 'mul']), num(d - 1), num(d - 1));
       case 1:

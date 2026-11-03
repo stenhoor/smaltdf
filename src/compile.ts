@@ -43,10 +43,6 @@ interface Ctx {
 
 const BIN_SQL: Record<string, string> = { '=': '=', '<>': '<>', '<': '<', '<=': '<=', '>': '>', '>=': '>=', '+': '+', '-': '-', '*': '*', '/': '/', '%': '%', AND: 'AND', OR: 'OR', IS: 'IS', 'IS NOT': 'IS NOT', '||': '||' };
 
-function floorSql(v: string): string {
-  return `(CAST(${v} AS INTEGER) - (${v} < CAST(${v} AS INTEGER)))`;
-}
-
 function litValue(n: Node): LitValue {
   if (n.k !== 'lit') throw new SmaltdfError('InvalidOperationError', 'expected a literal argument');
   return n.v;
@@ -65,7 +61,12 @@ export function compileExpr(n: Node, c: Ctx): string {
     case 'bin': {
       const l = compileExpr(n.l, c);
       const r = compileExpr(n.r, c);
-      if (n.op === '//') return floorSql(`(CAST(${l} AS REAL) / ${r})`);
+      // Polars' floor division: rounded down, an integer for integer operands.
+      if (n.op === '//') {
+        const q = `floor(CAST(${l} AS REAL) / ${r})`;
+        const ints = dtypeOf(n.l, c.schema) === Int64 && dtypeOf(n.r, c.schema) === Int64;
+        return ints ? `CAST(${q} AS INTEGER)` : q;
+      }
       return `(${l} ${BIN_SQL[n.op]} ${r})`;
     }
     case 'not':
@@ -123,10 +124,6 @@ export function compileExpr(n: Node, c: Ctx): string {
 function compileFn(name: string, args: Node[], c: Ctx): string {
   const x = compileExpr(args[0], c);
   switch (name) {
-    case 'floor':
-      return floorSql(x);
-    case 'ceil':
-      return `(CAST(${x} AS INTEGER) + (${x} > CAST(${x} AS INTEGER)))`;
     case 'str_contains':
       return `(instr(${x}, ${compileExpr(args[1], c)}) > 0)`;
     case 'str_starts_with': {
@@ -319,12 +316,11 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
     case 'bin': {
       if (['=', '<>', '<', '<=', '>', '>=', 'AND', 'OR', 'IS', 'IS NOT'].includes(n.op)) return Bool;
       if (n.op === '||') return Str;
-      if (n.op === '//') return Int64;
       const l = dtypeOf(n.l, schema);
       const r = dtypeOf(n.r, schema);
       if (l === Float64 || r === Float64) return Float64;
       if ((l === Int64 || l === Bool) && (r === Int64 || r === Bool)) return Int64;
-      return Unknown;
+      return n.op === '//' ? Float64 : Unknown;
     }
     case 'not':
     case 'isnull':
@@ -364,12 +360,14 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
       switch (n.name) {
         case 'length':
         case 'octet_length':
-        case 'floor':
-        case 'ceil':
         case 'sign':
           return Int64;
-        case 'round':
-          return Float64;
+        case 'floor':
+        case 'ceil':
+          return dtypeOf(n.args[0], schema) === Int64 ? Int64 : Float64;
+        case 'abs':
+        case 'coalesce':
+          return dtypeOf(n.args[0], schema);
         case 'str_contains':
         case 'str_starts_with':
         case 'str_ends_with':
@@ -385,7 +383,8 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
         case 'str_tail':
           return Str;
         default:
-          return dtypeOf(n.args[0], schema);
+          // round and the math functions (sqrt, pow, ln, sin, …) give REALs.
+          return Float64;
       }
   }
 }

@@ -90,17 +90,69 @@ export class Expr {
     if (upperBound != null) e = when(e.gt(upperBound)).then(toExpr(upperBound)).otherwise(e);
     return e;
   }
-  sqrt(): Expr {
-    throw needsEngine('sqrt', 'a sqrt() function (or plugin-registered scalar functions)');
+
+  // ------------------------------------------------------------ math (smaltdb's math functions)
+  // Results are REAL. Where Polars gives NaN or -inf (sqrt(-1), log(0)), smaltdb gives NULL: docs/divergences.md.
+  pow(exponent: ExprOrValue): Expr {
+    return this.fn('pow', [toExpr(exponent)]);
   }
-  pow(exponent: number): Expr {
-    if (!Number.isInteger(exponent) || exponent < 0 || exponent > 16) {
-      throw needsEngine(`pow(${exponent})`, 'a pow() function (or plugin-registered scalar functions)');
-    }
-    if (exponent === 0) return when(this.isNull()).then(lit(null)).otherwise(lit(1));
-    let e: Expr = this;
-    for (let i = 1; i < exponent; i++) e = e.mul(this);
-    return e;
+  sqrt(): Expr {
+    return this.fn('sqrt');
+  }
+  exp(): Expr {
+    return this.fn('exp');
+  }
+  /** The logarithm to `base` (default e). */
+  log(base: number = Math.E): Expr {
+    if (base === Math.E) return this.fn('ln');
+    if (base === 10) return this.fn('log10');
+    if (base === 2) return this.fn('log2');
+    return new Expr({ k: 'fn', name: 'log', args: [lit(base).node, this.node] });
+  }
+  log10(): Expr {
+    return this.fn('log10');
+  }
+  sin(): Expr {
+    return this.fn('sin');
+  }
+  cos(): Expr {
+    return this.fn('cos');
+  }
+  tan(): Expr {
+    return this.fn('tan');
+  }
+  arcsin(): Expr {
+    return this.fn('asin');
+  }
+  arccos(): Expr {
+    return this.fn('acos');
+  }
+  arctan(): Expr {
+    return this.fn('atan');
+  }
+  sinh(): Expr {
+    return this.fn('sinh');
+  }
+  cosh(): Expr {
+    return this.fn('cosh');
+  }
+  tanh(): Expr {
+    return this.fn('tanh');
+  }
+  arcsinh(): Expr {
+    return this.fn('asinh');
+  }
+  arccosh(): Expr {
+    return this.fn('acosh');
+  }
+  arctanh(): Expr {
+    return this.fn('atanh');
+  }
+  degrees(): Expr {
+    return this.fn('degrees');
+  }
+  radians(): Expr {
+    return this.fn('radians');
   }
 
   // ------------------------------------------------------------ comparison
@@ -190,13 +242,13 @@ export class Expr {
     return new Expr({ k: 'agg', fn: 'var', x: this.node, ddof });
   }
   std(_ddof = 1): Expr {
-    throw needsEngine('std', 'a sqrt() function or a stddev() aggregate');
+    throw needsEngine('std', "smaltdb's statistics aggregates (in progress)");
   }
   median(): Expr {
-    throw needsEngine('median', 'a median() aggregate (or plugin-registered aggregate functions)');
+    throw needsEngine('median', "smaltdb's statistics aggregates (in progress)");
   }
   quantile(_q: number): Expr {
-    throw needsEngine('quantile', 'a percentile aggregate (or plugin-registered aggregate functions)');
+    throw needsEngine('quantile', "smaltdb's statistics aggregates (in progress)");
   }
   first(): Expr {
     throw needsEngine('first', 'an order-preserving first() aggregate');

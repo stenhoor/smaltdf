@@ -29,6 +29,8 @@ const DIVERGENCES: Divergence[] = [
   { id: 'sum-of-nothing', ops: [{ op: 'filter', args: [{ call: 'gt', on: { col: 'a' }, args: [{ lit: 100 }] }] }, sel('s', { call: 'sum', on: { col: 'a' } })], smaltdf: [[null]], polars: [[0]] },
   { id: 'sort-nulls-default', ops: [{ op: 'sort', args: ['a'], kwargs: { descending: true } }, { op: 'select', args: ['a'] }], smaltdf: [[7], [2], [-7], [null]], polars: [[null], [7], [2], [-7]] },
   { id: 'cast-text-to-number', ops: [sel('n', { call: 'cast', on: { col: 's' }, args: [{ dtype: 'Int64' }] })], smaltdf: [[3], [0], [null], [4]], polars: { error: /InvalidOperationError/ } },
+  { id: 'nan-is-null', ops: [sel('r', { call: 'sqrt', on: { col: 'a' } })], smaltdf: [[Math.sqrt(7)], [null], [null], [Math.SQRT2]], polars: [[Math.sqrt(7)], ['nan'], [null], [Math.SQRT2]] },
+  { id: 'nan-is-null', ops: [sel('r', { call: 'log', on: { col: 'b' } })], smaltdf: [[Math.LN2], [Math.LN2], [0], [null]], polars: [[Math.LN2], [Math.LN2], [0], ['-inf']] },
   { id: 'unsigned-lengths', ops: [sel('n', { call: 'sub', on: { call: 'str.len_chars', on: { col: 's' } }, args: [{ lit: 2 }] })], smaltdf: [[-1], [-1], [null], [-1]], polars: [[4294967295], [4294967295], [null], [4294967295]] },
 ];
 

@@ -121,7 +121,7 @@ describe('LazyFrame', () => {
     const { pl } = setup();
     await expect(pl.scanTable('orders').select('nope').collect()).rejects.toMatchObject({ kind: 'ColumnNotFoundError' });
     await expect(pl.scanTable('orders').select('id', col('qty').alias('id')).collect()).rejects.toMatchObject({ kind: 'DuplicateError' });
-    expect(() => col('a').std()).toThrow(/needs a sqrt/);
+    expect(() => col('a').std()).toThrow(/statistics aggregates/);
     await expect(pl.scanTable('orders').groupBy('region').agg(col('qty')).collect()).rejects.toMatchObject({ kind: 'InvalidOperationError' });
   });
 });

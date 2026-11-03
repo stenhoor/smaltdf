@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.cache/
+*.tgz
+__pycache__/
+.venv/

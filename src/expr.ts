@@ -7,7 +7,8 @@ import type { LitValue } from './values.js';
 
 export type RankMethod = 'average' | 'min' | 'max' | 'dense' | 'ordinal';
 export type BinOp = '+' | '-' | '*' | '/' | '%' | '//' | '=' | '<>' | '<' | '<=' | '>' | '>=' | 'AND' | 'OR' | 'IS' | 'IS NOT' | '||';
-export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'n_unique' | 'var';
+export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'n_unique' | 'var' | 'std' | 'median' | 'quantile' | 'skew' | 'kurtosis' | 'corr' | 'cov';
+export type QuantileInterpolation = 'nearest' | 'higher' | 'lower' | 'midpoint' | 'linear' | 'equiprobable';
 
 export type Node =
   | { k: 'col'; names: string[] | '*'; exclude: string[] }
@@ -17,7 +18,18 @@ export type Node =
   | { k: 'neg'; x: Node }
   | { k: 'isnull'; x: Node; not: boolean }
   | { k: 'fn'; name: string; args: Node[]; opts?: Record<string, unknown> }
-  | { k: 'agg'; fn: AggFn; x: Node | null; ddof?: number }
+  | {
+      k: 'agg';
+      fn: AggFn;
+      x: Node | null;
+      /** The second input of corr and cov. */
+      y?: Node;
+      ddof?: number;
+      quantile?: number;
+      interpolation?: 'lower' | 'linear';
+      bias?: boolean;
+      fisher?: boolean;
+    }
   | { k: 'alias'; x: Node; name: string }
   | { k: 'rename'; x: Node; how: 'prefix' | 'suffix'; s: string }
   | { k: 'cast'; x: Node; dtype: DataType }
@@ -238,17 +250,37 @@ export class Expr {
   nUnique(): Expr {
     return this.agg('n_unique');
   }
-  var(ddof = 1): Expr {
-    return new Expr({ k: 'agg', fn: 'var', x: this.node, ddof });
+  // The statistics are smaltdb's aggregates (var_samp, stddev_pop, median, percentile_cont, …).
+  /** The variance (`ddof` 1: sample, 0: population); `var(0)` or `var({ ddof: 0 })`. */
+  var(ddof: number | { ddof?: number } = 1): Expr {
+    return new Expr({ k: 'agg', fn: 'var', x: this.node, ddof: typeof ddof === 'number' ? ddof : (ddof.ddof ?? 1) });
   }
-  std(_ddof = 1): Expr {
-    throw needsEngine('std', "smaltdb's statistics aggregates (in progress)");
+  /** The standard deviation (`ddof` 1: sample, 0: population); `std(0)` or `std({ ddof: 0 })`. */
+  std(ddof: number | { ddof?: number } = 1): Expr {
+    return new Expr({ k: 'agg', fn: 'std', x: this.node, ddof: typeof ddof === 'number' ? ddof : (ddof.ddof ?? 1) });
   }
   median(): Expr {
-    throw needsEngine('median', "smaltdb's statistics aggregates (in progress)");
+    return this.agg('median');
   }
-  quantile(_q: number): Expr {
-    throw needsEngine('quantile', "smaltdb's statistics aggregates (in progress)");
+  /**
+   * The `quantile` (0–1) of the values. smaltdb has `linear` (percentile_cont) and `lower` (percentile_disc);
+   * pass one of them: Polars' default, `nearest`, and the other methods are not available yet.
+   */
+  quantile(quantile: number, options: QuantileInterpolation | { interpolation?: QuantileInterpolation } = 'nearest'): Expr {
+    const interpolation = typeof options === 'string' ? options : (options.interpolation ?? 'nearest');
+    if (interpolation !== 'linear' && interpolation !== 'lower') {
+      throw needsEngine(`quantile(interpolation=${JSON.stringify(interpolation)}); pass 'linear' or 'lower'`, `a percentile aggregate with ${interpolation} interpolation`);
+    }
+    if (!(quantile >= 0 && quantile <= 1)) throw new SmaltdfError('InvalidOperationError', `quantile must be between 0 and 1, not ${quantile}`);
+    return new Expr({ k: 'agg', fn: 'quantile', x: this.node, quantile, interpolation });
+  }
+  /** Skewness; `bias: false` corrects for sample bias. */
+  skew(options: { bias?: boolean } = {}): Expr {
+    return new Expr({ k: 'agg', fn: 'skew', x: this.node, bias: options.bias ?? true });
+  }
+  /** Kurtosis: excess (Fisher's) unless `fisher: false`; `bias: false` corrects for sample bias. */
+  kurtosis(options: { fisher?: boolean; bias?: boolean } = {}): Expr {
+    return new Expr({ k: 'agg', fn: 'kurtosis', x: this.node, fisher: options.fisher ?? true, bias: options.bias ?? true });
   }
   first(): Expr {
     throw needsEngine('first', 'an order-preserving first() aggregate');
@@ -410,6 +442,20 @@ export const mean = (...names: string[]): Expr => col(...names).mean();
 export const min = (...names: string[]): Expr => col(...names).min();
 export const max = (...names: string[]): Expr => col(...names).max();
 export const count = (...names: string[]): Expr => col(...names).count();
+export const median = (...names: string[]): Expr => col(...names).median();
+export const std = (name: string, ddof = 1): Expr => col(name).std(ddof);
+export const var_ = (name: string, ddof = 1): Expr => col(name).var(ddof);
+
+/** Pearson's correlation coefficient of two columns. */
+export function corr(a: IntoExpr, b: IntoExpr, options: { method?: 'pearson' | 'spearman' } = {}): Expr {
+  if ((options.method ?? 'pearson') !== 'pearson') throw needsEngine(`corr(method=${JSON.stringify(options.method)})`, 'a rank correlation aggregate');
+  return new Expr({ k: 'agg', fn: 'corr', x: toColumn(a).node, y: toColumn(b).node });
+}
+
+/** The covariance of two columns (`ddof` 1: sample). */
+export function cov(a: IntoExpr, b: IntoExpr, options: { ddof?: number } = {}): Expr {
+  return new Expr({ k: 'agg', fn: 'cov', x: toColumn(a).node, y: toColumn(b).node, ddof: options.ddof ?? 1 });
+}
 export const nUnique = (...names: string[]): Expr => col(...names).nUnique();
 
 /** Text from several expressions joined by `separator`; NULL when any part is NULL. */
@@ -487,7 +533,7 @@ function show(n: Node): string {
     case 'fn':
       return `${show(n.args[0])}.${n.name}(${n.args.slice(1).map(show).join(', ')})`;
     case 'agg':
-      return n.x ? `${show(n.x)}.${n.fn}()` : 'len()';
+      return n.y ? `${n.fn}(${show(n.x!)}, ${show(n.y)})` : n.x ? `${show(n.x)}.${n.fn}()` : 'len()';
     case 'alias':
       return `${show(n.x)}.alias(${JSON.stringify(n.name)})`;
     case 'rename':

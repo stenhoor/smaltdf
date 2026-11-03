@@ -36,6 +36,7 @@ const DIVERGENCES: Divergence[] = [
   { id: 'cast-text-to-number', ops: [sel('n', { call: 'cast', on: { col: 's' }, args: [{ dtype: 'Int64' }] })], smaltdf: [[3], [0], [null], [4]], polars: { error: /InvalidOperationError/ } },
   { id: 'nan-is-null', ops: [sel('r', { call: 'sqrt', on: { col: 'a' } })], smaltdf: [[Math.sqrt(7)], [null], [null], [Math.SQRT2]], polars: [[Math.sqrt(7)], ['nan'], [null], [Math.SQRT2]] },
   { id: 'nan-is-null', ops: [sel('r', { call: 'log', on: { col: 'b' } })], smaltdf: [[Math.LN2], [Math.LN2], [0], [null]], polars: [[Math.LN2], [Math.LN2], [0], ['-inf']] },
+  { id: 'nan-is-null', frame: { columns: { c: [2, 2, 2] }, schema: { c: 'Int64' } }, ops: [sel('k', { call: 'skew', on: { col: 'c' } })], smaltdf: [[null]], polars: [['nan']] },
   { id: 'float-division-by-zero', ops: [sel('q', { call: 'truediv', on: { col: 'f' }, args: [{ lit: 0.0 }] })], smaltdf: [[null], [null], [null], [null]], polars: [['inf'], ['-inf'], ['inf'], [null]] },
   { id: 'integer-overflow', frame: big, ops: [sel('x', { call: 'mul', on: { col: 'i' }, args: [{ lit: 2 }] })], smaltdf: [[2 ** 63], [2]], polars: [[-(2 ** 63)], [2]] },
   { id: 'integer-overflow', frame: { columns: { i: [2 ** 62, 2 ** 62] }, schema: { i: 'Int64' } }, ops: [sel('s', { call: 'sum', on: { col: 'i' } })], smaltdf: { error: /integer overflow/ }, polars: [[-(2 ** 63)]] },

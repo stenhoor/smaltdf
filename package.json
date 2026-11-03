@@ -1,13 +1,12 @@
 {
   "name": "@smaltdb/df",
   "version": "0.1.0",
-  "description": "Dataframes for smaltdb: the Polars expression API, compiled to SQL and run in the smaltdb engine",
+  "description": "A TypeScript language for smaltdb with dataframe interfaces, built on smaltdb's engine plan layer",
   "keywords": [
     "smaltdb",
     "dataframe",
-    "polars",
-    "narwhals",
-    "sql"
+    "typescript",
+    "dsl"
   ],
   "author": "stenhoor",
   "license": "MIT",

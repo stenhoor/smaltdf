@@ -3,7 +3,7 @@
 // not (smaltdb flattens those again: `SELECT … FROM (SELECT …) WHERE …` runs as one fused scan).
 //
 // Literals are bound as numbered parameters (`?1`, `?2`, …), so the text of a statement depends only on its shape.
-import { Boolean as Bool, Float64, Int64, Null, String as Str, Unknown, type DataType, type Schema } from './dtypes.js';
+import { Binary, Boolean as Bool, Float64, Int64, Null, String as Str, Unknown, type DataType, type Schema } from './dtypes.js';
 import { SmaltdfError, needsEngine } from './errors.js';
 import type { Node } from './expr.js';
 import type { Plan } from './plan.js';
@@ -43,10 +43,6 @@ interface Ctx {
 
 const BIN_SQL: Record<string, string> = { '=': '=', '<>': '<>', '<': '<', '<=': '<=', '>': '>', '>=': '>=', '+': '+', '-': '-', '*': '*', '/': '/', '%': '%', AND: 'AND', OR: 'OR', IS: 'IS', 'IS NOT': 'IS NOT', '||': '||' };
 
-function floorSql(v: string): string {
-  return `(CAST(${v} AS INTEGER) - (${v} < CAST(${v} AS INTEGER)))`;
-}
-
 function litValue(n: Node): LitValue {
   if (n.k !== 'lit') throw new SmaltdfError('InvalidOperationError', 'expected a literal argument');
   return n.v;
@@ -65,7 +61,12 @@ export function compileExpr(n: Node, c: Ctx): string {
     case 'bin': {
       const l = compileExpr(n.l, c);
       const r = compileExpr(n.r, c);
-      if (n.op === '//') return floorSql(`(CAST(${l} AS REAL) / ${r})`);
+      // Polars' floor division: rounded down, an integer for integer operands.
+      if (n.op === '//') {
+        const q = `floor(CAST(${l} AS REAL) / ${r})`;
+        const ints = dtypeOf(n.l, c.schema) === Int64 && dtypeOf(n.r, c.schema) === Int64;
+        return ints ? `CAST(${q} AS INTEGER)` : q;
+      }
       return `(${l} ${BIN_SQL[n.op]} ${r})`;
     }
     case 'not':
@@ -123,10 +124,6 @@ export function compileExpr(n: Node, c: Ctx): string {
 function compileFn(name: string, args: Node[], c: Ctx): string {
   const x = compileExpr(args[0], c);
   switch (name) {
-    case 'floor':
-      return floorSql(x);
-    case 'ceil':
-      return `(CAST(${x} AS INTEGER) + (${x} > CAST(${x} AS INTEGER)))`;
     case 'str_contains':
       return `(instr(${x}, ${compileExpr(args[1], c)}) > 0)`;
     case 'str_starts_with': {
@@ -183,11 +180,35 @@ function compileAgg(n: Extract<Node, { k: 'agg' }>, c: Ctx): string {
     case 'n_unique':
       if (over) throw needsEngine('nUnique() over a window', 'DISTINCT in window aggregates');
       return `(count(DISTINCT ${x}) + (count(${x}) < count(*)))`;
-    case 'var': {
-      const y = `CAST(${x} AS REAL)`;
-      const s = call(`sum(${y})`);
+    case 'var':
+    case 'std': {
+      const d = n.ddof ?? 1;
+      const sq = n.fn === 'std' ? 'stddev' : 'var';
+      if (d === 1 || d === 0) return call(`${sq}_${d === 1 ? 'samp' : 'pop'}(${x})`);
+      // Polars' ddof: the population variance scaled by n / (n - ddof); NULL unless n > ddof.
       const k = call(`count(${x})`);
-      return `((${call(`sum(${y} * ${y})`)} - ${s} * ${s} / ${k}) / (${k} - ${n.ddof ?? 1}))`;
+      const v = `(${call(`var_pop(${x})`)} * ${k} / (${k} - ${d}))`;
+      const val = n.fn === 'std' ? `sqrt(${v})` : v;
+      return `(CASE WHEN ${k} > ${d} THEN ${val} END)`;
+    }
+    case 'median':
+      return call(`median(${x})`);
+    case 'quantile':
+      return call(`${n.interpolation === 'lower' ? 'percentile_disc' : 'percentile_cont'}(${x}, ${c.params.add(n.quantile!)})`);
+    case 'skew':
+      return call(`skewness${n.bias ? '_pop' : ''}(${x})`);
+    case 'kurtosis': {
+      const k = call(`kurtosis${n.bias ? '_pop' : ''}(${x})`);
+      return n.fisher ? k : `(${k} + 3)`;
+    }
+    case 'corr':
+      return call(`corr(${x}, ${compileExpr(n.y!, c)})`);
+    case 'cov': {
+      const d = n.ddof ?? 1;
+      const y = compileExpr(n.y!, c);
+      if (d === 1 || d === 0) return call(`covar_${d === 1 ? 'samp' : 'pop'}(${x}, ${y})`);
+      const k = call(`count(${x} + ${y})`);
+      return `(CASE WHEN ${k} > ${d} THEN ${call(`covar_pop(${x}, ${y})`)} * ${k} / (${k} - ${d}) END)`;
     }
   }
 }
@@ -243,7 +264,7 @@ function children(n: Node): Node[] {
     case 'fn':
       return n.args;
     case 'agg':
-      return n.x ? [n.x] : [];
+      return [...(n.x ? [n.x] : []), ...(n.y ? [n.y] : [])];
     case 'case':
       return [...n.whens.flat(), ...(n.otherwise ? [n.otherwise] : [])];
     case 'over':
@@ -299,7 +320,7 @@ function substitute(n: Node, name: string): Node {
     case 'fn':
       return { ...n, args: n.args.map((a) => substitute(a, name)) };
     case 'agg':
-      return { ...n, x: n.x && substitute(n.x, name) };
+      return { ...n, x: n.x && substitute(n.x, name), y: n.y && substitute(n.y, name) };
     case 'case':
       return { ...n, whens: n.whens.map(([w, t]) => [substitute(w, name), substitute(t, name)] as [Node, Node]), otherwise: n.otherwise && substitute(n.otherwise, name) };
     case 'over':
@@ -319,12 +340,11 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
     case 'bin': {
       if (['=', '<>', '<', '<=', '>', '>=', 'AND', 'OR', 'IS', 'IS NOT'].includes(n.op)) return Bool;
       if (n.op === '||') return Str;
-      if (n.op === '//') return Int64;
       const l = dtypeOf(n.l, schema);
       const r = dtypeOf(n.r, schema);
       if (l === Float64 || r === Float64) return Float64;
       if ((l === Int64 || l === Bool) && (r === Int64 || r === Bool)) return Int64;
-      return Unknown;
+      return n.op === '//' ? Float64 : Unknown;
     }
     case 'not':
     case 'isnull':
@@ -350,6 +370,13 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
       switch (n.fn) {
         case 'mean':
         case 'var':
+        case 'std':
+        case 'median':
+        case 'quantile':
+        case 'skew':
+        case 'kurtosis':
+        case 'corr':
+        case 'cov':
           return Float64;
         case 'count':
         case 'len':
@@ -364,12 +391,14 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
       switch (n.name) {
         case 'length':
         case 'octet_length':
-        case 'floor':
-        case 'ceil':
         case 'sign':
           return Int64;
-        case 'round':
-          return Float64;
+        case 'floor':
+        case 'ceil':
+          return dtypeOf(n.args[0], schema) === Int64 ? Int64 : Float64;
+        case 'abs':
+        case 'coalesce':
+          return dtypeOf(n.args[0], schema);
         case 'str_contains':
         case 'str_starts_with':
         case 'str_ends_with':
@@ -385,7 +414,8 @@ export function dtypeOf(n: Node, schema: Schema): DataType {
         case 'str_tail':
           return Str;
         default:
-          return dtypeOf(n.args[0], schema);
+          // round and the math functions (sqrt, pow, ln, sin, …) give REALs.
+          return Float64;
       }
   }
 }
@@ -396,7 +426,7 @@ export function litType(v: LitValue): DataType {
   if (typeof v === 'bigint') return Int64;
   if (typeof v === 'number') return Number.isInteger(v) ? Int64 : Float64;
   if (typeof v === 'string') return Str;
-  return { name: 'Binary', sql: 'BLOB' } as DataType;
+  return Binary;
 }
 
 // ------------------------------------------------------------------ query blocks

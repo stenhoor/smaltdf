@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { Float64, Int64, String as Str, col, len, lit, when } from '../src/index.js';
+import { Binary, Float64, Int64, String as Str, col, corr, cov, len, lit, when } from '../src/index.js';
 import { setup, sorted } from './helpers.js';
 
 describe('LazyFrame', () => {
@@ -121,7 +121,48 @@ describe('LazyFrame', () => {
     const { pl } = setup();
     await expect(pl.scanTable('orders').select('nope').collect()).rejects.toMatchObject({ kind: 'ColumnNotFoundError' });
     await expect(pl.scanTable('orders').select('id', col('qty').alias('id')).collect()).rejects.toMatchObject({ kind: 'DuplicateError' });
-    expect(() => col('a').std()).toThrow(/needs a sqrt/);
+    expect(() => col('a').first()).toThrow(/needs an order-preserving first/);
     await expect(pl.scanTable('orders').groupBy('region').agg(col('qty')).collect()).rejects.toMatchObject({ kind: 'InvalidOperationError' });
+  });
+
+  test('JavaScript data: types inferred from values, NaN, large integers, empty columns (docs/divergences.md)', async () => {
+    const { pl } = setup();
+    // 1.0 is the integer 1 in JavaScript, so the column is Int64 unless a schema says otherwise.
+    const ints = pl.DataFrame({ x: [1.0, 2.0] });
+    expect(ints.dtypes).toEqual([Int64]);
+    expect((await ints.select(col('x').truediv(2))).getColumn('x')).toEqual(new Float64Array([0, 1]));
+    const floats = pl.DataFrame({ x: [1.0, 2.0] }, { schema: { x: Float64 } });
+    expect((await floats.select(col('x').truediv(2))).getColumn('x')).toEqual(new Float64Array([0.5, 1]));
+    expect(pl.DataFrame({ x: new Float64Array([1, 2.5]) }).dtypes).toEqual([Float64]);
+    // NaN is stored as NULL.
+    const nan = await pl.DataFrame({ f: [NaN, 1.5] }).select(col('f').isNull().alias('n'), col('f').sum().alias('s'));
+    expect(nan.toDicts()).toEqual([{ n: true, s: 1.5 }, { n: false, s: 1.5 }]);
+    // Integers beyond 2^53 stay exact as bigint (an Int64 schema turns unsafe integer numbers into bigint).
+    const big = await pl.DataFrame({ i: [2n ** 62n + 1n, 1n] }).select(col('i').add(1));
+    expect(big.getColumn('i')).toEqual([2n ** 62n + 2n, 2]);
+    expect((await pl.DataFrame({ i: [2 ** 62] }, { schema: { i: Int64 } }).select('i')).getColumn('i')).toEqual([2n ** 62n]);
+    // Binary columns, and an empty result's columns (a Float64Array of length 0, whatever the type).
+    const bin = pl.DataFrame({ b: [new Uint8Array([1, 2]), null] });
+    expect(bin.dtypes).toEqual([Binary]);
+    expect((await bin.filter(col('b').isNotNull())).getColumn('b')).toEqual([new Uint8Array([1, 2])]);
+    const empty = await pl.scanTable('orders').filter(col('id').gt(99)).select('region').collect();
+    expect(empty.shape).toEqual([0, 1]);
+    expect(empty.getColumn('region')).toEqual(new Float64Array(0));
+    expect(empty.dtypes).toEqual([Str]);
+  });
+
+  test('statistics map onto smaltdb aggregates, in groups and over windows', async () => {
+    const { pl } = setup();
+    const lf = pl.scanTable('orders').groupBy('region').agg(col('price').std(), col('price').var({ ddof: 0 }).alias('v0'), col('price').median().alias('m'), col('price').quantile(0.5, 'linear').alias('q'), corr('qty', 'price').alias('c'), cov('qty', 'price').alias('cv'));
+    const sql = await lf.explain();
+    for (const f of ['stddev_samp(', 'var_pop(', 'median(', 'percentile_cont(', 'corr(', 'covar_samp(']) expect(sql).toContain(f);
+    expect(sql.split('SELECT').length - 1).toBe(1);
+    const north = (await lf.filter(col('region').eq('north')).collect()).toDicts()[0];
+    expect(north.m).toBe(1.5);
+    expect(north.v0).toBeCloseTo(0.2638888888888889, 12); // prices 1.5, 2.0, 0.75
+    const w = await pl.scanTable('orders').select('id', col('price').median().over('region').alias('m')).sort('id').collect();
+    expect(w.getColumn('m')).toEqual(new Float64Array([1.5, 1.75, 1.5, 0.5, 1.75, 1.5]));
+    expect(() => col('x').quantile(0.5)).toThrow(/pass 'linear' or 'lower'/);
+    expect(() => corr('a', 'b', { method: 'spearman' })).toThrow(/rank correlation/);
   });
 });

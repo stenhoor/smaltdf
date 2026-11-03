@@ -6,12 +6,12 @@
 import { executor, type Connection, type Executor } from './engine.js';
 import { DataFrame, LazyFrame } from './frame.js';
 import * as dt from './dtypes.js';
-import { all, col, concatStr, count, exclude, len, lit, max, mean, min, nUnique, sum, when } from './expr.js';
+import { all, col, concatStr, corr, count, cov, exclude, len, lit, max, mean, median, min, nUnique, std, sum, var_, when } from './expr.js';
 import type { DataType } from './dtypes.js';
 import type { SqlValue } from './values.js';
 
 export { DataFrame, LazyFrame, GroupBy, LazyGroupBy, type Column, type Row, type ExprArgs, type SortOptions, type JoinOptions } from './frame.js';
-export { Expr, ExprStr, ExprName, When, Then, col, all, exclude, lit, len, sum, mean, min, max, count, nUnique, concatStr, when, type IntoExpr, type ExprOrValue, type RankMethod } from './expr.js';
+export { Expr, ExprStr, ExprName, When, Then, col, all, exclude, lit, len, sum, mean, min, max, count, nUnique, median, std, var_, corr, cov, concatStr, when, type IntoExpr, type ExprOrValue, type RankMethod, type QuantileInterpolation } from './expr.js';
 export { Int64, Float64, String, Utf8, Boolean, Binary, Null, Unknown, dtypes, type DataType, type Schema } from './dtypes.js';
 export { SmaltdfError, type ErrorKind } from './errors.js';
 export type { Connection, Executor, Columns } from './engine.js';
@@ -40,6 +40,12 @@ export function smaltdf(db: Connection | Executor) {
     max,
     count,
     nUnique,
+    median,
+    std,
+    /** `pl.var` (`var` is reserved in JavaScript). */
+    var: var_,
+    corr,
+    cov,
     concatStr,
     when,
     /** A DataFrame from columns or rows; `schema` overrides the inferred types. */

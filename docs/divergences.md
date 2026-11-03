@@ -29,7 +29,8 @@ a browser worker. The tests do not yet run in a browser, so OPFS storage and a r
 
 The cases below give different results from Polars, on every backend. Each one is pinned in
 [`test/divergences.test.ts`](../test/divergences.test.ts), which checks smaltdf's result on every backend and Polars'
-result, so a change on either side fails that test. The generated differential tests leave these operations out.
+result, so a change on either side fails that test. The generated differential tests leave these operations out, except `nan-is-null`: where Polars gives NaN, the
+comparison expects NULL and nothing else.
 
 | Id | Operation | smaltdf (smaltdb) | Polars | Portable form |
 | --- | --- | --- | --- | --- |
@@ -39,7 +40,7 @@ result, so a change on either side fails that test. The generated differential t
 | `round-half` | `round(decimals)` | Halves round away from zero: `2.5 → 3`, `0.125 → 0.13`. | Halves round to even: `2.5 → 2`, `0.125 → 0.12`. | — |
 | `integer-overflow` | Integer arithmetic or `sum()` beyond 64 bits | `+`, `-`, `*` give a REAL (`2^62 * 2 = 9.223372036854776e18`); `sum()` fails with `integer overflow`. | Wraps around: `2^62 * 2 = -2^63`. | Cast to `Float64` first when values can be that large. |
 | `sum-of-nothing` | `sum()` over no rows, or over only NULLs | NULL | `0` | `col('a').sum().fillNull(0)` |
-| `nan-is-null` | Math functions outside their domain: `sqrt(-1)`, `log(0)`, `arcsin(2)` | NULL | `NaN`, or `-inf` for `log(0)` | Filter or `when` on the argument's domain. |
+| `nan-is-null` | Results that are not a number: math functions outside their domain (`sqrt(-1)`, `log(0)`, `arcsin(2)`), and undefined statistics (`skew()` or `kurtosis()` of a constant, `corr()` with zero variance) | NULL: smaltdb has no NaN | `NaN`, or `-inf` for `log(0)` | Filter or `when` on the argument's domain; for statistics, treat NULL as undefined. |
 | `sort-nulls-default` | `sort(…)` without `nullsLast` | NULLs first when ascending, last when descending. | NULLs first in both directions. | Pass `nullsLast` explicitly: smaltdf then matches Polars. |
 | `cast-text-to-number` | `col('s').cast(Int64)` on text that is not a number | `0` (SQL `CAST`) | An error (`InvalidOperationError`); NULL with `strict=False` | — |
 | `unsigned-lengths` | `str.lenChars()`, `str.lenBytes()` | `Int64`: arithmetic can go below zero. | `UInt32`: arithmetic below zero wraps around. | `str.lenChars().cast(Int64)` in Polars gives smaltdf's result. |
@@ -76,6 +77,8 @@ How values come back, the same on every backend:
 ## Not supported yet
 
 These fail with `InvalidOperationError`, naming the engine feature they need (see the open items in
-[DESIGN.md](DESIGN.md)): `std`, `median` and `quantile` (smaltdb's statistics aggregates, in progress), `first`, `last`,
+[DESIGN.md](DESIGN.md)): `quantile` with Polars' default interpolation (`nearest`) or with `higher`, `midpoint` or
+`equiprobable` (pass `'linear'`, smaltdb's `percentile_cont`, or `'lower'`, its `percentile_disc`), `corr` with
+`method: 'spearman'`, `first`, `last`,
 regular-expression patterns in `str.contains` / `str.replace` / `str.replaceAll` (literal patterns work), `nUnique()`
 over a window, `unique(keep=…)` other than `'any'`, and `maintainOrder`.

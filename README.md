@@ -72,7 +72,7 @@ Expressions: `col`, `lit`, `when/then/otherwise`, `len`, arithmetic (`add`, `sub
 `mod`), comparisons (`eq`, `ne`, `lt`, `le`, `gt`, `ge`, `eqMissing`), `and`, `or`, `not`, `isNull`, `fillNull`, `isIn`,
 `isBetween`, `cast`, `abs`, `round`, `floor`, `ceil`, `clip`; math with `sqrt`, `pow`, `exp`, `log`, `log10`,
 `sin`, `cos`, `tan`, `arcsin`, `arctan`, `sinh`, `tanh`, `degrees`, `radians` and more; aggregates `sum`, `mean`, `min`, `max`, `count`, `len`,
-`nUnique`, `var`; windows with `over(…)` and `rank(method)`; strings with `str.lenChars`, `str.toUppercase`,
+`nUnique`, `var`, `std`, `median`, `quantile`, `skew`, `kurtosis`, `corr`, `cov`; windows with `over(…)` and `rank(method)`; strings with `str.lenChars`, `str.toUppercase`,
 `str.contains`, `str.startsWith`, `str.slice`, `str.replaceAll`, `str.stripChars` and more; output names with
 `alias` and `name.suffix` / `name.prefix`.
 

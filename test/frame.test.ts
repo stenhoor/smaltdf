@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { Binary, Float64, Int64, String as Str, col, len, lit, when } from '../src/index.js';
+import { Binary, Float64, Int64, String as Str, col, corr, cov, len, lit, when } from '../src/index.js';
 import { setup, sorted } from './helpers.js';
 
 describe('LazyFrame', () => {
@@ -121,7 +121,7 @@ describe('LazyFrame', () => {
     const { pl } = setup();
     await expect(pl.scanTable('orders').select('nope').collect()).rejects.toMatchObject({ kind: 'ColumnNotFoundError' });
     await expect(pl.scanTable('orders').select('id', col('qty').alias('id')).collect()).rejects.toMatchObject({ kind: 'DuplicateError' });
-    expect(() => col('a').std()).toThrow(/statistics aggregates/);
+    expect(() => col('a').first()).toThrow(/needs an order-preserving first/);
     await expect(pl.scanTable('orders').groupBy('region').agg(col('qty')).collect()).rejects.toMatchObject({ kind: 'InvalidOperationError' });
   });
 
@@ -149,5 +149,20 @@ describe('LazyFrame', () => {
     expect(empty.shape).toEqual([0, 1]);
     expect(empty.getColumn('region')).toEqual(new Float64Array(0));
     expect(empty.dtypes).toEqual([Str]);
+  });
+
+  test('statistics map onto smaltdb aggregates, in groups and over windows', async () => {
+    const { pl } = setup();
+    const lf = pl.scanTable('orders').groupBy('region').agg(col('price').std(), col('price').var({ ddof: 0 }).alias('v0'), col('price').median().alias('m'), col('price').quantile(0.5, 'linear').alias('q'), corr('qty', 'price').alias('c'), cov('qty', 'price').alias('cv'));
+    const sql = await lf.explain();
+    for (const f of ['stddev_samp(', 'var_pop(', 'median(', 'percentile_cont(', 'corr(', 'covar_samp(']) expect(sql).toContain(f);
+    expect(sql.split('SELECT').length - 1).toBe(1);
+    const north = (await lf.filter(col('region').eq('north')).collect()).toDicts()[0];
+    expect(north.m).toBe(1.5);
+    expect(north.v0).toBeCloseTo(0.2638888888888889, 12); // prices 1.5, 2.0, 0.75
+    const w = await pl.scanTable('orders').select('id', col('price').median().over('region').alias('m')).sort('id').collect();
+    expect(w.getColumn('m')).toEqual(new Float64Array([1.5, 1.75, 1.5, 0.5, 1.75, 1.5]));
+    expect(() => col('x').quantile(0.5)).toThrow(/pass 'linear' or 'lower'/);
+    expect(() => corr('a', 'b', { method: 'spearman' })).toThrow(/rank correlation/);
   });
 });

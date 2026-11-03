@@ -1,6 +1,6 @@
 # smaltdf design
 
-Status: revised 2026-11-03, after the owner's corrections. This replaces the first version, which compiled to SQL.
+Status: revised 2026-11-03, after the owner's corrections. This replaces the first version.
 
 smaltdf is a TypeScript language for smaltdb that provides dataframe interfaces to the engine. Polars inspired its
 functions, and they are similar to Polars', but smaltdf is its own language, specified here and in its reference.
@@ -12,10 +12,10 @@ smaltui and, later, smaltnb are how people use it interactively.
 | # | Topic | Decision |
 |---|---|---|
 | 1 | Language | A TypeScript DSL with dataframe interfaces: frames, expressions, method chaining (`table('orders').filter(col('qty').gt(1)).groupBy('region').agg(col('qty').sum())`). Polars inspired the functions and their names, and they are similar where that helps, but smaltdf's own spec decides. |
-| 2 | Execution | **No SQL.** smaltdf generates neither SQL text nor the SQL syntax tree. It is a second front end to smaltdb's engine: it builds plans for the shared logical plan layer that the SQL front end also targets ([smaltdb ADR 0014](https://github.com/stenhoor/smaltdb/blob/claude/adr-plan-layer/docs/adr/0014-shared-plan-layer.md), proposed). Through that layer it uses the engine's optimizer, B+tree and columnar storage, fused scans, morsels and spilling. |
+| 2 | Execution | smaltdf builds plans for the engine's shared plan layer ([smaltdb ADR 0014](https://github.com/stenhoor/smaltdb/blob/claude/adr-plan-layer/docs/adr/0014-shared-plan-layer.md), proposed), a layer in neutral engine terms that belongs to no language. Through it smaltdf uses the engine's optimizer, B+tree and columnar storage, fused scans, morsels and spilling. It generates no SQL. |
 | 3 | Placement | A client package that builds plans and sends them to the engine: in-process, over the worker protocol, or from a plugin (ADR 0014 §4). The plan layer itself belongs in smaltdb core. |
 | 4 | Core changes | Engine features smaltdf needs belong in smaltdb core: the plan layer (ADR 0014), and the math and statistics functions (merged in smaltdb #41 and #42). smaltdf does not reimplement engine features. |
-| 5 | Semantics | smaltdf has its own spec. Where it differs from SQL (for example, division), it says so by choosing different functions in the plan (ADR 0014 §2), not by emulation. |
+| 5 | Semantics | smaltdf has its own spec. Its behaviour (division, comparisons, aggregates of no values, conversions) is defined there and implemented by the functions its plans call in the engine's function registries (ADR 0014 §2); missing functions are added to the engine. |
 | 6 | Testing | Tests check smaltdf against its own spec. Where a smaltdf function overlaps a Polars function, a comparison test runs both and documents the differences, so users can see them (the Python Polars harness stays for that purpose only). The same query must give the same result on row and columnar storage, in process and over the worker. |
 | 7 | Visuals | None: smaltdf has no display. Brand assets from `stenhoor/smalt-brand` are used only for its README and docs. |
 

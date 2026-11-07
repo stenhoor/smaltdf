@@ -315,8 +315,10 @@ export class Frame {
       throw fromEngine(err);
     }
     const bools = columns.map((c) => c.type === 'bool');
+    const datetimes = columns.map((c) => c.type === 'datetime');
     // The engine gives a bool column as booleans (smaltdb ADR 0018); 0 / 1 from a column it types int read as one too.
-    const rows = raw.rows.map((r) => r.map((v, i) => (bools[i] && v !== null && typeof v !== 'boolean' ? v !== 0 && v !== 0n : v)));
+    // A datetime is a JS Date (ms; smaltdb ADR 0019); the other dates and times stay the engine's text.
+    const rows = raw.rows.map((r) => r.map((v, i) => (bools[i] && v !== null && typeof v !== 'boolean' ? v !== 0 && v !== 0n : datetimes[i] && typeof v === 'string' ? dateOfText(v) : v)));
     const names = columns.map((c) => c.name);
     return {
       columns: names,
@@ -499,6 +501,16 @@ export function frame(data: FrameData): Frame {
   return new Frame({ kind: 'values', columns: columns.map(({ name, data, type }) => ({ name, data, type })), length }, []);
 }
 
+/** A `datetime`'s result text (`2026-11-07 12:30:00.123456`) as a JS Date: ms, so finer digits are cut. */
+function dateOfText(text: string): Date {
+  const m = /^([+-]?\d{4,})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(text);
+  if (!m) throw new DfError('SMALTDF_INTERNAL', `collect: unexpected datetime text ${text}`);
+  const d = new Date(0);
+  d.setUTCFullYear(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  d.setUTCHours(Number(m[4]), Number(m[5]), Number(m[6]), Number(((m[7] ?? '') + '000').slice(0, 3)));
+  return d;
+}
+
 const INT_ARRAYS = [Int8Array, Int16Array, Int32Array, Uint8Array, Uint16Array, Uint32Array, BigInt64Array];
 
 /** A column's data as the engine reads it, and its smaltdf type. */
@@ -506,13 +518,23 @@ function columnOf(name: string, values: ArrayLike<unknown> & Iterable<unknown>):
   if (values instanceof Float64Array || values instanceof Float32Array) return { data: values, type: 'real', length: values.length };
   if (INT_ARRAYS.some((k) => values instanceof k)) return { data: values as ValueColumn, type: 'int', length: values.length };
   const arr = Array.from(values);
-  const kinds = new Set<string>(arr.filter((v) => v !== null && v !== undefined).map((v) => (v instanceof Uint8Array ? 'blob' : typeof v)));
+  const kinds = new Set<string>(arr.filter((v) => v !== null && v !== undefined).map((v) => (v instanceof Uint8Array ? 'blob' : v instanceof Date ? 'Date' : typeof v)));
   const kind = (k: string): boolean => kinds.has(k);
-  if ([...kinds].some((k) => !['number', 'bigint', 'string', 'boolean', 'blob'].includes(k))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} holds values of a kind smaltdf has no type for (${[...kinds].join(', ')})`);
+  if ([...kinds].some((k) => !['number', 'bigint', 'string', 'boolean', 'blob', 'Date'].includes(k))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} holds values of a kind smaltdf has no type for (${[...kinds].join(', ')})`);
   if (kinds.size > 1 && !(kinds.size === 2 && kind('number') && kind('bigint'))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} mixes ${[...kinds].join(' and ')}`);
   // An integer in the safe range is a number, as the engine gives integers back; a bigint only beyond it.
   const clean = arr.map((v) => (v === undefined ? null : typeof v === 'bigint' && v >= -9007199254740991n && v <= 9007199254740991n ? Number(v) : v));
   if (kind('boolean')) return { data: clean.map((v) => (v === null ? null : v ? 1 : 0)), type: 'bool', length: arr.length };
+  if (kind('Date')) {
+    // JS Dates are datetimes: their ms as µs (smaltdb ADR 0019).
+    const us = clean.map((v) => {
+      if (v === null) return null;
+      const ms = (v as Date).getTime();
+      if (Number.isNaN(ms)) throw new DfError('SMALTDF_RANGE', `frame: column ${name} holds an invalid Date`);
+      return ms * 1000;
+    });
+    return { data: us, type: 'datetime', length: arr.length };
+  }
   if (kind('string')) return { data: clean as string[], type: 'text', length: arr.length };
   if (kind('blob')) return { data: clean as Uint8Array[], type: 'blob', length: arr.length };
   if (kind('number') || kind('bigint')) {

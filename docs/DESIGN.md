@@ -54,8 +54,8 @@ and columnar tables, in process and over the worker, and with no SQL registered.
    reference ("Compared with Polars"), and the test fails when that section is out of date. It runs in its own CI
    job (decision D).
 
-Types beyond the engine's current ones (`bool`, NaN as a value, dates and times, lists and structs) follow smaltdb
-ADR 0016 step 11, one type at a time. Until `bool` lands, see decision C below.
+Types beyond the engine's first ones follow smaltdb ADR 0016 step 11, one type at a time: `bool` and NaN (ADR 0018) and
+dates and times (ADR 0019) are in; lists and structs are next.
 
 ## Owner's decisions (2026-11-07)
 

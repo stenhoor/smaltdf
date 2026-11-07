@@ -40,7 +40,7 @@ while it runs (`select: add: integer overflow in add_checked`).
 | Expression | Meaning | Engine operation |
 |---|---|---|
 | `col(name)` | A column of the frame. | column reference |
-| `lit(value)` | A constant: number, bigint, string, `Uint8Array`, boolean, `null`. | literal |
+| `lit(value)` | A constant: number, bigint, string, `Uint8Array`, boolean, JS `Date` (a `datetime`), `null`. | literal |
 | `a.add(b)`, `.sub`, `.mul` | Arithmetic; int with int stays int, any real makes real. Integer overflow is an error. | `add_checked`, `sub_checked`, `mul_checked` |
 | `a.div(b)` | True division: always real. `7 / 2` is `3.5`. A non-zero value divided by zero is `Infinity` or `-Infinity`; `0 / 0` is NaN. | `div_float` |
 | `a.floorDiv(b)` | Division rounded toward negative infinity: `-7 // 2` is `-4`. | `div_floor` |
@@ -49,13 +49,50 @@ while it runs (`select: add: integer overflow in add_checked`).
 | `a.eqMissing(b)` | Equality where null equals null. | `cmp_is` |
 | `a.and(b)`, `.or(b)`, `.not()` | Logic with nulls (null and false is false; null or true is true). | `and`, `or`, `not` |
 | `a.isNull()`, `.isNotNull()` | Null tests; never null. | null test |
-| `a.cast(type)` | Conversion to `int`, `real`, `text`, `blob`. A value that doesn't convert is an error. | `cast_integer_strict`, `cast_real_strict`, `cast_text`, `cast_blob` |
+| `a.cast(type)` | Conversion to `int`, `real`, `text`, `blob`, `date`, `datetime`. A value that doesn't convert is an error. | `cast_integer_strict`, `cast_real_strict`, `cast_text`, `cast_blob`, `cast_date`, `cast_datetime` |
 | `a.alias(name)` | The same expression under another name. | — |
 | `a.round(digits)` | Rounding half to even. | `round_half_even` |
 | `a.str.lower()`, `.upper()` | Unicode case mapping. | `lower_unicode`, `upper_unicode` |
 | `a.str.contains(pattern)` | Whether a regular expression matches anywhere in the text. | `regex_match` |
 
 Comparisons and logic have type `bool` in smaltdf; `collect` gives `true` / `false`.
+
+## Dates and times
+
+Four types hold dates and times ([smaltdb ADR 0019](https://smaltdb.dev/adr/0019-dates-and-times)), to the µs:
+
+| Type | Holds | `collect` gives |
+|---|---|---|
+| `date` | a calendar date | text, `2026-11-07` |
+| `datetime` | a date and time of day, with no zone | a JS `Date` (ms) |
+| `time` | a time of day | text, `13:04:05.678` |
+| `duration` | a span of time | ISO 8601 text, `P1DT2H30M` |
+
+A column of JS `Date`s in `frame(...)`, and `lit(new Date(...))`, are `datetime`s. A table that `createTable` makes
+stores them as `DATE`, `DATETIME`, `TIME` and `DURATION`.
+
+| Expression | Meaning | Engine operation |
+|---|---|---|
+| `a.dt.year()`, `.month()`, `.day()` | Parts of a `date` or `datetime`. | `year`, `month`, `day` |
+| `a.dt.weekday()`, `.ordinalDay()` | The ISO weekday (Monday is 1), the day of the year. | `weekday`, `day_of_year` |
+| `a.dt.hour()`, `.minute()`, `.second()`, `.microsecond()` | Parts of a `datetime` or `time`; `microsecond` is the µs within the second. | `hour` … |
+| `a.dt.date()` | The date of a `datetime`. | `cast_date` |
+| `a.dt.truncate(every)` | The start of its `1y`, `1q`, `1mo`, `1w` (Monday), `1d`, `1h`, `1m`, `1s`, `1ms` or `1us`. | `trunc_temporal` |
+| `a.dt.offsetBy(by)` | Moved by text such as `1mo`, `-2d` or `1y3mo` (`y`, `q`, `mo`, `w`, `d`, `h`, `m`, `s`, `ms`, `us`), or by a `duration`. Months keep the day of the month, or take the last day of a shorter one. | `offset_by` |
+| `a.dt.strftime(format)` | Text written with a `strftime` format. | `format_temporal` |
+| `a.str.toDate(format?)`, `.str.toDatetime(format?)` | Text read as a date: in the result format, or with a `strftime` format. Text that doesn't read is an error. | `cast_date`, `parse_date`, … |
+| `a.dt.toZone(zone)` | The wall-clock time in `zone` of a UTC instant. | `to_zone` |
+| `a.dt.fromZone(zone, { ambiguous? })` | The UTC instant of a wall-clock time in `zone`. A time that occurs twice is the earliest unless `ambiguous` is `latest` or `raise`; one that doesn't occur moves forward. | `from_zone` |
+| `a.dt.zoneOffset(zone)` | The zone's offset from UTC at a UTC instant, a `duration`. | `zone_offset` |
+
+- **Zones:** a zone is an IANA name (`Europe/Paris`), `UTC` or an offset (`+05:30`). It is any expression, so a
+  column of zones gives each row its own. A `datetime` carries no zone: the data says whether it is a UTC instant or a
+  wall-clock time.
+- **Arithmetic:** `datetime - datetime`, `date - date` and `time - time` are `duration`s. A `datetime` plus or minus a
+  `duration` is a `datetime`. Durations add, multiply by an `int` and `sum`. Other arithmetic on dates and times is an
+  error: move a `date` with `dt.offsetBy`.
+- **Comparisons:** values of the same type compare. Text compared with a `date` or `datetime` is read as one, and
+  text that isn't one is an error: `col('ts').ge('2026-01-01 00:00:00')`.
 
 ## Aggregation
 
@@ -258,7 +295,7 @@ when they give their column names (their types are then `any`).
 
 ## Not yet in the language
 
-Dates and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
+Lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
 
 ## Compared with Polars
 
@@ -268,8 +305,8 @@ true. Order is compared too, except where neither side promises one (`groupBy` a
 
 <!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->
 
-With Polars 2.1.0, 47 of the 55 cases give the same columns, types and rows (or both an
-error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`.
+With Polars 2.1.0, 60 of the 68 cases give the same columns, types and rows (or both an
+error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`, `dt.year`, `dt.hour`, `dt.date`, `dt.truncate`, `dt.offsetBy`, `dt.strftime`, `sub`, `gt`, `str.toDatetime`, `str.toDate`, `dt.toZone`, `dt.fromZone`.
 
 These differ:
 

@@ -27,7 +27,7 @@ export interface CreateTableOptions {
 }
 
 /** The storage type a smaltdf type is kept as in a new table. */
-const STORAGE: Readonly<Record<DfType, StorageType>> = { int: 'INTEGER', bool: 'BOOLEAN', real: 'REAL', num: 'NUMERIC', text: 'TEXT', blob: 'BLOB', null: 'ANY', any: 'ANY' };
+const STORAGE: Readonly<Record<DfType, StorageType>> = { int: 'INTEGER', bool: 'BOOLEAN', real: 'REAL', num: 'NUMERIC', text: 'TEXT', blob: 'BLOB', null: 'ANY', any: 'ANY', date: 'DATE', datetime: 'DATETIME', time: 'TIME', duration: 'DURATION' };
 
 /** Whether a column of type `t` may be written into a table column stored as `s` without changing its values' kind. */
 function fits(t: DfType, s: StorageType): boolean {
@@ -44,6 +44,9 @@ function fits(t: DfType, s: StorageType): boolean {
       return s === 'TEXT';
     case 'blob':
       return s === 'BLOB';
+    default:
+      // A date or time goes into its own storage type only.
+      return s === STORAGE[t];
   }
 }
 

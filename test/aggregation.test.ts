@@ -93,7 +93,7 @@ describe.each(KINDS)('%s', (kind) => {
     await expect(table('orders').withColumns(col('qty').sum()).collect(db)).rejects.toThrow(/withColumns: sum is an aggregate: use it in groupBy\(…\)\.agg\(…\)/);
     await expect(table('orders').select('region', col('qty').sum()).collect(db)).rejects.toThrow(/select: mixes aggregates and columns \(region\)/);
     await expect(table('orders').groupBy('region').agg(col('qty')).collect(db)).rejects.toThrow(/agg: no column "qty" in the groupBy keys/);
-    await expect(table('orders').groupBy('region').agg(col('region').sum()).collect(db)).rejects.toThrow('agg: sum: takes numbers, not text');
+    await expect(table('orders').groupBy('region').agg(col('region').sum()).collect(db)).rejects.toThrow('agg: sum: takes numbers or durations, not text');
     await expect(table('orders').groupBy('nope').agg(len()).collect(db)).rejects.toThrow(/no column "nope"/);
     await expect(table('orders').unique({ subset: 'nope' }).collect(db)).rejects.toThrow(/unique: no column "nope"/);
     await expect(table('orders').select(col('qty').sum().sum()).collect(db)).rejects.toThrow(/sum is an aggregate/);

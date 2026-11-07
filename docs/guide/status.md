@@ -24,9 +24,9 @@ and through the worker, with no other language registered:
 The engine's types ([smaltdb ADR 0016](https://smaltdb.dev/adr/0016-plan-api-for-every-language), step 11), each with
 its own engine decision first. `bool` and NaN are in ([ADR 0018](https://smaltdb.dev/adr/0018-bool-and-nan)):
 comparisons and logic are the engine's `bool`, a `bool` column written to a table reads back as `bool`, and NaN is a
-value of `real` that sorts after every number (`0 / 0` is NaN). Still to come:
-
-1. Dates and times.
-2. Lists and structs, then `explode`.
+value of `real` that sorts after every number (`0 / 0` is NaN). So are dates and times
+([ADR 0019](https://smaltdb.dev/adr/0019-dates-and-times)): `date`, `datetime`, `time` and `duration`, the `dt`
+methods, time zones as values, and JS `Date`s in and out ([Dates and times](../REFERENCE#dates-and-times)). Still to
+come: lists and structs, then `explode`.
 
 Then the package name (`@smaltworks/smaltdf`) and the first release, together with smaltdb 0.9.0.

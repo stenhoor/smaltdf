@@ -5,9 +5,9 @@
  */
 import { col, concat, len, lit, table, type Frame } from '../src/index.js';
 
-/** A table as both sides make it: columns typed `int`, `real` or `text`. */
+/** A table as both sides make it: columns typed `int`, `real`, `text`, `date` or `datetime` (as result text). */
 export interface CompareTable {
-  readonly columns: readonly [string, 'int' | 'real' | 'text'][];
+  readonly columns: readonly [string, 'int' | 'real' | 'text' | 'date' | 'datetime'][];
   readonly rows: readonly (readonly (number | bigint | string | null)[])[];
 }
 
@@ -23,6 +23,15 @@ export const TABLES: Readonly<Record<string, CompareTable>> = {
   quotes: { columns: [['t', 'int'], ['sym', 'text'], ['bid', 'real']], rows: [[0, 'a', 9.5], [2, 'b', 19.5], [4, 'a', 10.5], [9, 'b', 20.5]] },
   scores: { columns: [['name', 'text'], ['subject', 'text'], ['score', 'int']], rows: [['bo', 'math', 70], ['ann', 'math', 90], ['ann', 'art', 80], ['cy', 'music', 50], ['bo', 'art', null]] },
   wide: { columns: [['id', 'int'], ['q1', 'int'], ['q2', 'int']], rows: [[1, 10, 20], [2, null, 40]] },
+  events: {
+    columns: [['id', 'int'], ['d', 'date'], ['ts', 'datetime'], ['s', 'text']],
+    rows: [
+      [1, '2024-01-31', '2026-11-07 13:04:05.678', '07/11/2026 13:04'],
+      [2, '2024-02-29', '2024-03-31 00:00:00', '29/02/2024 00:00'],
+      [3, '1969-12-31', '1969-12-31 23:59:59.999', '31/12/1969 23:59'],
+      [4, null, null, null],
+    ],
+  },
 };
 
 export interface Case {
@@ -41,6 +50,7 @@ export interface Case {
 
 const o = () => table('orders');
 const n = () => table('nums');
+const e = () => table('events');
 
 export const CASES: readonly Case[] = [
   // Frames
@@ -109,4 +119,18 @@ export const CASES: readonly Case[] = [
   { id: 'pivot-sum', fn: 'pivot', df: table('scores').pivot('subject', { index: 'name', values: 'score', aggregate: 'sum', columns: ['math', 'art', 'music'], maintainOrder: true }), polars: "t['scores'].pivot('subject', index='name', values='score', aggregate_function='sum', maintain_order=True)" },
   { id: 'unpivot', fn: 'unpivot', df: table('wide').unpivot({ index: 'id' }), polars: "t['wide'].unpivot(index='id')", differs: "smaltdf gives each row's columns together (row by row); Polars gives each column's rows together (column by column)." },
   { id: 'unpivot-unordered', fn: 'unpivot', df: table('wide').unpivot({ index: 'id' }), polars: "t['wide'].unpivot(index='id')", ordered: false },
+  // Dates and times
+  { id: 'dt-parts', fn: 'dt.year', df: e().select(col('ts').dt.year(), col('ts').dt.month().alias('mo'), col('ts').dt.day().alias('d'), col('ts').dt.weekday().alias('wd'), col('d').dt.ordinalDay().alias('od')), polars: "t['events'].select(pl.col('ts').dt.year(), pl.col('ts').dt.month().alias('mo'), pl.col('ts').dt.day().alias('d'), pl.col('ts').dt.weekday().alias('wd'), pl.col('d').dt.ordinal_day().alias('od'))" },
+  { id: 'dt-clock', fn: 'dt.hour', df: e().select(col('ts').dt.hour(), col('ts').dt.minute().alias('mi'), col('ts').dt.second().alias('s'), col('ts').dt.microsecond().alias('us')), polars: "t['events'].select(pl.col('ts').dt.hour(), pl.col('ts').dt.minute().alias('mi'), pl.col('ts').dt.second().alias('s'), pl.col('ts').dt.microsecond().alias('us'))" },
+  { id: 'dt-date', fn: 'dt.date', df: e().select(col('ts').dt.date()), polars: "t['events'].select(pl.col('ts').dt.date())" },
+  { id: 'dt-truncate', fn: 'dt.truncate', df: e().select(col('ts').dt.truncate('1mo'), col('ts').dt.truncate('1w').alias('w'), col('ts').dt.truncate('1h').alias('h'), col('d').dt.truncate('1q').alias('q')), polars: "t['events'].select(pl.col('ts').dt.truncate('1mo'), pl.col('ts').dt.truncate('1w').alias('w'), pl.col('ts').dt.truncate('1h').alias('h'), pl.col('d').dt.truncate('1q').alias('q'))" },
+  { id: 'dt-offset-by', fn: 'dt.offsetBy', df: e().select(col('d').dt.offsetBy('1mo'), col('ts').dt.offsetBy('-1y2mo').alias('back'), col('ts').dt.offsetBy('36h').alias('later')), polars: "t['events'].select(pl.col('d').dt.offset_by('1mo'), pl.col('ts').dt.offset_by('-1y2mo').alias('back'), pl.col('ts').dt.offset_by('36h').alias('later'))" },
+  { id: 'dt-strftime', fn: 'dt.strftime', df: e().select(col('ts').dt.strftime('%Y/%m/%d %H:%M:%S %a %b %j')), polars: "t['events'].select(pl.col('ts').dt.strftime('%Y/%m/%d %H:%M:%S %a %b %j'))" },
+  { id: 'dt-sub', fn: 'sub', df: e().select(col('ts').sub(col('d').cast('datetime')).alias('since'), col('d').sub(lit('2024-01-01').str.toDate()).alias('days')), polars: "t['events'].select((pl.col('ts') - pl.col('d').cast(pl.Datetime('us'))).alias('since'), (pl.col('d') - pl.lit('2024-01-01').str.to_date()).alias('days'))" },
+  { id: 'dt-compare', fn: 'gt', df: e().filter(col('ts').gt('2024-01-01 00:00:00')).select('id'), polars: "t['events'].filter(pl.col('ts') > pl.lit('2024-01-01 00:00:00').str.to_datetime()).select('id')" },
+  { id: 'dt-sum', fn: 'sum', df: e().select(col('ts').sub(col('d').cast('datetime')).sum()), polars: "t['events'].select((pl.col('ts') - pl.col('d').cast(pl.Datetime('us'))).sum())" },
+  { id: 'str-to-datetime', fn: 'str.toDatetime', df: e().select(col('s').str.toDatetime('%d/%m/%Y %H:%M')), polars: "t['events'].select(pl.col('s').str.to_datetime('%d/%m/%Y %H:%M', time_unit='us'))" },
+  { id: 'str-to-date-strict', fn: 'str.toDate', df: e().select(col('s').str.toDate('%Y-%m-%d')), polars: "t['events'].select(pl.col('s').str.to_date('%Y-%m-%d'))" },
+  { id: 'dt-to-zone', fn: 'dt.toZone', df: e().select(col('ts').dt.toZone('America/New_York')), polars: "t['events'].select(pl.col('ts').dt.replace_time_zone('UTC').dt.convert_time_zone('America/New_York').dt.replace_time_zone(None))" },
+  { id: 'dt-from-zone', fn: 'dt.fromZone', df: e().select(col('ts').dt.fromZone('Asia/Kolkata')), polars: "t['events'].select(pl.col('ts').dt.replace_time_zone('Asia/Kolkata').dt.convert_time_zone('UTC').dt.replace_time_zone(None))" },
 ];

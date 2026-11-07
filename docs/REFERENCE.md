@@ -60,24 +60,37 @@ Comparisons and logic have type `bool` in smaltdf; `collect` gives `true` / `fal
 ## Aggregation
 
 ```ts
-table('orders').groupBy('region').agg(col('qty').sum().alias('qty'), col('price').mean());
+import { col, len, table } from '@smaltdb/df';
+
+table('orders').groupBy('region').agg(col('qty').sum(), col('price').mean().alias('avg_price'), len());
+table('orders').select(col('qty').sum(), col('qty').max().alias('top')); // one row
 ```
 
-`groupBy(...keys, { maintainOrder? })` gives one row per distinct key, with the keys first, then each aggregate.
-Groups come in no particular order unless `maintainOrder: true`, which gives them in order of each group's first row.
+`groupBy(...keys, { maintainOrder? })` then `.agg(...exprs)` gives one row per distinct key: the keys first (names or
+expressions), then one column per expression. Groups come in no particular order unless `maintainOrder: true`, which
+gives them in order of each group's first row.
 
-| Aggregate | Meaning | Engine operation |
-|---|---|---|
-| `sum()` | Sum of the non-null values; 0 when there are none. | `sum`, then `coalesce` with 0 |
-| `mean()` | Mean of the non-null values; null when there are none. | `avg` |
-| `min()`, `max()` | Smallest, largest; null when there are none. | `min`, `max` |
-| `count()` | Number of non-null values. | `count` |
-| `len()` | Number of rows. | `count(*)` |
-| `first()`, `last()` | The first, last value in the group's order. | `first`, `last` |
-| `median()`, `std()`, `var()` | As named; `std` and `var` are the sample forms. | `median`, `stddev_samp`, `var_samp` |
+An expression in `agg` is made of aggregates (`col('qty').sum().div(len())`) and the keys (`col('region').str.upper()`);
+any other column is an error, since a group has many of its values. A `select` whose expressions are all aggregates
+(and literals) is one row over every row. Aggregates anywhere else (`filter`, `withColumns`) are an error.
 
-`unique({ subset?, keep? })` keeps one row per distinct value of `subset` (all columns by default): the first
-(`keep: 'first'`, the default) or last.
+| Aggregate | Meaning | Type | Engine operation |
+|---|---|---|---|
+| `sum()` | Sum of the non-null values; 0 when there are none (also for a group whose values are all null). | its input's: int or real | `sum`, then `coalesce` with 0 |
+| `mean()` | Mean of the non-null values; null when there are none. | real | `avg` |
+| `min()`, `max()` | Smallest, largest; null when there are none. | its input's | `min`, `max` |
+| `count()` | Number of non-null values. | int | `count` |
+| `len()` | Number of rows (a function, not a method: `len()`). | int | `count` of all rows |
+| `first()`, `last()` | The first, last value in the group's order. | its input's | `first`, `last` |
+| `median()` | The median of the non-null values. | real | `median` |
+| `std()`, `var()` | The sample standard deviation and variance. | real | `stddev_samp`, `var_samp` |
+
+A column is named after its input column (`col('qty').sum()` is `qty`; `len()` is `len`). An integer `sum` that
+overflows is an error, as integer arithmetic is.
+
+`unique({ subset?, keep?, maintainOrder? })` keeps one row per distinct value of `subset` (one name or several; all
+columns by default): the first (`keep: 'first'`, the default) or the last of each. Rows come in no particular order
+unless `maintainOrder: true`.
 
 ## Not yet in the language
 

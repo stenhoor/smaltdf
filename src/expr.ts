@@ -3,7 +3,7 @@
  * its plan is built. Each method maps to the engine operation that means what smaltdf's reference says.
  */
 import * as p from 'smaltdb/plan';
-import type { PlanExpr } from 'smaltdb/plan';
+import type { AggCall, PlanExpr } from 'smaltdb/plan';
 import { DfError, type DfOrigin } from './errors.js';
 import { type DfColumn, type DfType, isNumeric, planType } from './types.js';
 
@@ -15,7 +15,18 @@ type Node =
   | { readonly k: 'lit'; readonly value: number | bigint | string | boolean | Uint8Array | null }
   | { readonly k: 'op'; readonly method: string; readonly args: readonly Node[] }
   | { readonly k: 'cast'; readonly to: CastType; readonly arg: Node }
-  | { readonly k: 'alias'; readonly name: string; readonly arg: Node };
+  | { readonly k: 'alias'; readonly name: string; readonly arg: Node }
+  | AggNode;
+
+/** The aggregates (REFERENCE.md "Aggregation"). */
+export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'first' | 'last' | 'median' | 'std' | 'var';
+
+/** @internal An aggregate of `arg` (none for `len`). */
+export interface AggNode {
+  readonly k: 'agg';
+  readonly fn: AggFn;
+  readonly arg: Node | null;
+}
 
 export type CastType = 'int' | 'real' | 'text' | 'blob';
 
@@ -31,6 +42,8 @@ export interface Scope {
   readonly columns: readonly DfColumn[];
   readonly source: string;
   readonly step: string;
+  /** Resolves an aggregate, where the step aggregates (groupBy(…).agg, a select of aggregates); elsewhere none. */
+  readonly agg?: (n: AggNode) => Resolved;
 }
 
 const node = (x: ExprLike): Node => (x instanceof Expr ? x.node : { k: 'lit', value: x });
@@ -76,6 +89,28 @@ export class Expr {
   /** Rounding half to even, to `digits` places. */
   round(digits = 0): Expr { return this.op('round', digits); }
 
+  /** The sum of the non-null values; 0 when there are none. */
+  sum(): Expr { return this.aggregate('sum'); }
+  /** The mean of the non-null values; null when there are none. */
+  mean(): Expr { return this.aggregate('mean'); }
+  min(): Expr { return this.aggregate('min'); }
+  max(): Expr { return this.aggregate('max'); }
+  /** The number of non-null values. */
+  count(): Expr { return this.aggregate('count'); }
+  /** The first value, in the group's order. */
+  first(): Expr { return this.aggregate('first'); }
+  /** The last value, in the group's order. */
+  last(): Expr { return this.aggregate('last'); }
+  median(): Expr { return this.aggregate('median'); }
+  /** The sample standard deviation. */
+  std(): Expr { return this.aggregate('std'); }
+  /** The sample variance. */
+  var(): Expr { return this.aggregate('var'); }
+
+  private aggregate(fn: AggFn): Expr {
+    return new Expr({ k: 'agg', fn, arg: this.node });
+  }
+
   /** Text methods. */
   get str(): { lower(): Expr; upper(): Expr; contains(pattern: string): Expr } {
     return {
@@ -88,6 +123,9 @@ export class Expr {
 
 /** A column of the frame, by name. */
 export const col = (name: string): Expr => new Expr({ k: 'col', name });
+
+/** The number of rows (of the frame, or of each group). */
+export const len = (): Expr => new Expr({ k: 'agg', fn: 'len', arg: null });
 
 /** A constant. A number that is an integer is `int`, any other number `real`. */
 export const lit = (value: number | bigint | string | boolean | Uint8Array | null): Expr => new Expr({ k: 'lit', value });
@@ -168,7 +206,80 @@ function resolveNode(n: Node, scope: Scope): Resolved {
     }
     case 'op':
       return resolveOp(n, scope);
+    case 'agg':
+      if (!scope.agg) throw new DfError('SMALTDF_TYPE', `${scope.step}: ${n.fn} is an aggregate: use it in groupBy(…).agg(…), or in a select of aggregates only`);
+      return scope.agg(n);
   }
+}
+
+/** Whether `e` holds an aggregate. */
+export function hasAggregate(e: Expr | string): boolean {
+  const walk = (n: Node): boolean => {
+    switch (n.k) {
+      case 'agg':
+        return true;
+      case 'op':
+        return n.args.some(walk);
+      case 'cast':
+      case 'alias':
+        return walk(n.arg);
+      default:
+        return false;
+    }
+  };
+  return typeof e !== 'string' && walk(e.node);
+}
+
+/** Whether `e` reads a column outside its aggregates (which a select of aggregates can't). */
+export function readsColumns(e: Expr | string): boolean {
+  const walk = (n: Node): boolean => {
+    switch (n.k) {
+      case 'col':
+        return true;
+      case 'op':
+        return n.args.some(walk);
+      case 'cast':
+      case 'alias':
+        return walk(n.arg);
+      default:
+        return false;
+    }
+  };
+  return typeof e === 'string' || walk(e.node);
+}
+
+const AGG_FNS: Readonly<Record<AggFn, string>> = { sum: 'sum', mean: 'avg', min: 'min', max: 'max', count: 'count', len: 'count', first: 'first', last: 'last', median: 'median', std: 'stddev_samp', var: 'var_samp' };
+
+/** An aggregate resolved against the rows it aggregates (`input`): its call, its smaltdf type, and its name. */
+export function resolveAggregate(n: AggNode, input: Scope): { call: AggCall; type: DfType; name: string } {
+  if (n.arg === null) return { call: p.agg('count', [], 'int', { star: true }), type: 'int', name: 'len' };
+  // The argument is per row: no aggregate inside an aggregate.
+  const a = resolveNode(n.arg, { ...input, agg: undefined });
+  const numeric = isNumeric(a.type) || a.type === 'bool';
+  const need = (ok: boolean, what: string): void => {
+    if (!ok) throw typeError(input, n.fn, `${what}, not ${a.type}`);
+  };
+  let type: DfType;
+  switch (n.fn) {
+    case 'sum':
+      need(numeric, 'takes numbers');
+      type = a.type === 'real' ? 'real' : a.type === 'int' || a.type === 'bool' ? 'int' : 'num';
+      break;
+    case 'mean':
+    case 'median':
+    case 'std':
+    case 'var':
+      need(numeric, 'takes numbers');
+      type = 'real';
+      break;
+    case 'count':
+      type = 'int';
+      break;
+    default:
+      type = a.type;
+  }
+  const call = p.agg(AGG_FNS[n.fn], [a.plan], planType(type));
+  return { call: { ...call, origin: { step: input.step, method: n.fn } } as AggCall, type, name: a.name };
 }
 
 function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {

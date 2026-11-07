@@ -3,9 +3,9 @@
  * `plan(db)` gives the plan statement it runs as, and `collect(db)` runs it.
  */
 import * as p from 'smaltdb/plan';
-import type { CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey } from 'smaltdb/plan';
+import type { AggCall, CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey } from 'smaltdb/plan';
 import { DfError, fromEngine } from './errors.js';
-import { type Expr, type Resolved, type Scope, resolve } from './expr.js';
+import { Expr, type Resolved, type Scope, hasAggregate, readsColumns, resolve, resolveAggregate } from './expr.js';
 import { type DfColumn, type DfType, planType } from './types.js';
 
 /** What a frame's statement is built and run with: an engine `Database` (in process) or a client `Database`. */
@@ -37,7 +37,38 @@ type Step =
   | { readonly kind: 'sort'; readonly by: readonly (Expr | string)[]; readonly options: SortOptions }
   | { readonly kind: 'head'; readonly n: number }
   | { readonly kind: 'tail'; readonly n: number }
-  | { readonly kind: 'slice'; readonly offset: number; readonly n: number | undefined };
+  | { readonly kind: 'slice'; readonly offset: number; readonly n: number | undefined }
+  | { readonly kind: 'groupBy'; readonly keys: readonly (Expr | string)[]; readonly exprs: readonly (Expr | string)[]; readonly maintainOrder: boolean }
+  | { readonly kind: 'unique'; readonly subset: readonly string[] | undefined; readonly keep: 'first' | 'last'; readonly maintainOrder: boolean };
+
+export interface GroupByOptions {
+  /** Groups in order of each group's first row. Default false: in no particular order (it costs). */
+  readonly maintainOrder?: boolean;
+}
+
+export interface UniqueOptions {
+  /** The columns whose values must differ (default: all). */
+  readonly subset?: string | readonly string[];
+  /** Which row of each set of equal ones to keep. Default `first`. */
+  readonly keep?: 'first' | 'last';
+  /** Rows in order of each one's first occurrence. Default false: in no particular order. */
+  readonly maintainOrder?: boolean;
+}
+
+/** `groupBy(…)`, waiting for its aggregates. */
+export class GroupBy {
+  /** @internal */
+  constructor(
+    private readonly frame: Frame,
+    private readonly keys: readonly (Expr | string)[],
+    private readonly options: GroupByOptions,
+  ) {}
+
+  /** One row per distinct key: the keys first, then one column per expression. */
+  agg(...exprs: (Expr | string)[]): Frame {
+    return this.frame.then({ kind: 'groupBy', keys: this.keys, exprs, maintainOrder: this.options.maintainOrder ?? false });
+  }
+}
 
 /** Looks up tables: the engine's catalog, in process or as the client's snapshot. */
 export type Tables = (name: string) => CatalogTable | undefined;
@@ -49,7 +80,8 @@ export class Frame {
     private readonly steps: readonly Step[],
   ) {}
 
-  private then(step: Step): Frame {
+  /** @internal */
+  then(step: Step): Frame {
     return new Frame(this.source, [...this.steps, step]);
   }
 
@@ -88,6 +120,19 @@ export class Frame {
     return this.then({ kind: 'slice', offset: count('slice', offset), n: n === undefined ? undefined : count('slice', n) });
   }
 
+  /** Groups by `keys` (names or expressions); a last argument may give options. Then `.agg(…)`. */
+  groupBy(...keys: (Expr | string | GroupByOptions)[]): GroupBy {
+    const last = keys[keys.length - 1];
+    const options = last !== undefined && typeof last === 'object' && !(last instanceof Expr) ? (keys.pop() as GroupByOptions) : {};
+    return new GroupBy(this, keys as (Expr | string)[], options);
+  }
+
+  /** One row per distinct value of `subset` (all columns by default). */
+  unique(options: UniqueOptions = {}): Frame {
+    const subset = options.subset === undefined ? undefined : typeof options.subset === 'string' ? [options.subset] : [...options.subset];
+    return this.then({ kind: 'unique', subset, keep: options.keep ?? 'first', maintainOrder: options.maintainOrder ?? false });
+  }
+
   /** The plan statement the frame runs as, built against `db`'s catalog. */
   async plan(db: Db): Promise<PlanStatementInput> {
     return this.build(await tablesOf(db)).statement;
@@ -123,6 +168,13 @@ export class Frame {
       const scope: Scope = { columns, source: this.source, step: step.kind };
       switch (step.kind) {
         case 'select': {
+          if (step.exprs.some(hasAggregate)) {
+            // A select of aggregates: one row, over every row.
+            const bare = step.exprs.find((e) => readsColumns(e) && !hasAggregate(e)) ?? step.exprs.find((e) => typeof e === 'string');
+            if (bare !== undefined) throw new DfError('SMALTDF_TYPE', `select: mixes aggregates and columns (${typeof bare === 'string' ? bare : resolve(bare, scope).name}): aggregate each, or use groupBy(…).agg(…)`);
+            ({ op, columns } = aggregateStep(op, scope, [], step.exprs, false));
+            break;
+          }
           const rs = step.exprs.map((e) => resolve(e, scope));
           unique(step.kind, rs);
           op = p.project(op, rs.map((r) => r.plan));
@@ -165,6 +217,18 @@ export class Frame {
           op = p.sort(op, keys);
           break;
         }
+        case 'groupBy':
+          ({ op, columns } = aggregateStep(op, scope, step.keys, step.exprs, step.maintainOrder));
+          break;
+        case 'unique': {
+          const on = step.subset?.map((name) => {
+            const i = columns.findIndex((c) => c.name === name);
+            if (i < 0) throw new DfError('SMALTDF_SCHEMA', `unique: no column "${name}" in ${this.source} (columns: ${columns.map((c) => c.name).join(', ')})`);
+            return i;
+          });
+          op = p.distinct(op, columns.length, undefined, { ...(on ? { on } : {}), keep: step.keep, ...(step.maintainOrder ? { ordered: 'first' as const } : {}) });
+          break;
+        }
         case 'head':
           op = p.limit(op, step.n);
           break;
@@ -178,6 +242,33 @@ export class Frame {
     }
     return { statement: { kind: 'query', plan: op, columns: columns.map((c) => ({ name: c.name, type: planType(c.type) })) }, columns };
   }
+}
+
+/**
+ * An aggregation: `keys` (none: one row of everything) and expressions over aggregates. The aggregates are resolved
+ * against the rows (`input`); the rest of each expression against the keys. `sum` of no values is 0 (owner's
+ * decision B): its result is `coalesce(sum, 0)` with the zero of its type.
+ */
+function aggregateStep(input: PlanOp, scope: Scope, keys: readonly (Expr | string)[], exprs: readonly (Expr | string)[], maintainOrder: boolean): { op: PlanOp; columns: DfColumn[] } {
+  const ks = keys.map((k) => resolve(k, scope));
+  const calls: AggCall[] = [];
+  const post: Scope = {
+    columns: ks.map((k) => ({ name: k.name, type: k.type })),
+    source: keys.length ? 'the groupBy keys' : 'a select of aggregates',
+    step: keys.length ? 'agg' : scope.step,
+    agg: (n) => {
+      const r = resolveAggregate(n, { ...scope, step: keys.length ? 'agg' : scope.step });
+      calls.push(r.call);
+      let ref: PlanExpr = p.col(0, ks.length + calls.length - 1, planType(r.type));
+      if (n.fn === 'sum') ref = p.call('coalesce', [ref, p.lit(0, r.type === 'real' ? 'real' : 'int')], planType(r.type));
+      return { plan: ref, type: r.type, name: r.name };
+    },
+  };
+  const outs = exprs.map((e) => resolve(e, post));
+  unique(keys.length ? 'agg' : scope.step, [...ks, ...outs]);
+  const agg = p.aggregate(input, ks.map((k) => k.plan), calls, maintainOrder ? { ordered: 'first' } : {});
+  const op = p.project(agg, [...ks.map((k, i) => p.col(0, i, planType(k.type))), ...outs.map((o) => o.plan)]);
+  return { op, columns: [...ks, ...outs].map((r) => ({ name: r.name, type: r.type })) };
 }
 
 /** The rows of a table or view, in storage order. */

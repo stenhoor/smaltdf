@@ -20,8 +20,12 @@ it('imports nothing of smaltdb at run time but smaltdb/plan', () => {
   }
 });
 
+/** `text` without its comments: they may name what smaltdf is not; the code may not contain it. */
+const code = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
 it('holds no SQL text and calls no text API', () => {
-  for (const { f, text } of files) {
+  for (const { f, text: all } of files) {
+    const text = code(all);
     // A statement keyword followed by more of a statement: `'select'` alone is smaltdf's own method name.
     expect(text, f).not.toMatch(/['"`]\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|WITH|BEGIN|PRAGMA)\s+[^'"`\s]/i);
     expect(text, f).not.toMatch(/\.(exec|query|prepare|run)\(\s*['"`]/);

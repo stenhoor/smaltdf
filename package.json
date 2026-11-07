@@ -42,6 +42,9 @@
     "test": "node scripts/fetch-packed.mjs --check && vitest run",
     "check": "npm run typecheck && npm test",
     "compare": "node scripts/fetch-packed.mjs --check && vitest run --config vitest.compare.config.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs",
     "prepublishOnly": "npm run check && npm run build"
   },
   "peerDependencies": {
@@ -56,6 +59,7 @@
     "@types/node": "^22.20.5",
     "esbuild": "^0.28.2",
     "typescript": "5.9",
+    "vitepress": "^1.6.4",
     "vitest": "^5.0.5"
   }
 }

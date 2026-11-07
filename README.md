@@ -13,8 +13,10 @@ smaltdf is a TypeScript language for smaltdb with dataframe interfaces: frames, 
 run in the smaltdb engine, on its row and columnar tables. It builds plans for the engine's shared plan layer, the
 same layer every smaltdb language uses, so it gets the engine's optimizer, fused scans and spilling.
 
-> **Status: in development, not published.** Core frames work; the rest follows the order of work in
-> [docs/DESIGN.md](docs/DESIGN.md). The language is in [docs/REFERENCE.md](docs/REFERENCE.md).
+> **Status: in development, not published.** Steps 2–9 of [docs/DESIGN.md](docs/DESIGN.md) are in: frames,
+> aggregation, joins, windows, reshaping, data from JavaScript, writing, views and the Polars comparison tests. Docs:
+> [stenhoor.github.io/smaltdf](https://stenhoor.github.io/smaltdf/); the language is in
+> [docs/REFERENCE.md](docs/REFERENCE.md).
 
 smaltdf is a language, not a user interface: [smaltui](https://github.com/stenhoor/smaltui) (and, later, smaltnb) are
 the ways to use it interactively.

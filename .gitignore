@@ -4,3 +4,5 @@ dist/
 *.tgz
 __pycache__/
 .venv/
+docs/.vitepress/dist/
+docs/.vitepress/cache/

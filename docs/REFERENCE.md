@@ -1,7 +1,7 @@
 # smaltdf reference (v0)
 
-Draft: the part of the language that steps 2–5 of [DESIGN.md](DESIGN.md) implement. Where a decision for the owner
-is open, the proposed meaning is written and marked *(proposed)*.
+Draft: the part of the language that steps 2–5 of [DESIGN.md](DESIGN.md) implement, with the owner's decisions of
+2026-11-07.
 
 ## Frames
 
@@ -25,7 +25,7 @@ const result = await big.collect(db); // db: a smaltdb Database, in process or t
 | `select(...exprs)` | One column per expression, in that order. A string is `col(name)`. |
 | `withColumns(...exprs)` | The frame's columns, with these added at the end or replacing a column of the same name in place. |
 | `filter(...predicates)` | The rows where every predicate is true (not false, not null). Keeps order. |
-| `sort(by, { descending?, nullsLast? })` | Rows ordered by one or more expressions. Stable: equal rows keep their order. Nulls first by default *(proposed: Polars puts them first; check before step 2)*. |
+| `sort(by, { descending?, nullsLast? })` | Rows ordered by one or more expressions. Stable: equal rows keep their order. Nulls first by default. |
 | `head(n)`, `tail(n)`, `slice(offset, n?)` | The first `n` rows, the last `n`, or `n` from `offset`. |
 | `collect(db)` | Runs the frame. Resolves to `{ columns, types, rows }` and a `toObjects()` helper. |
 | `plan()` | The plan statement (`PlanStatementInput`) the frame runs as. |
@@ -39,7 +39,7 @@ built. The error names the method (`filter: no column "qtty" in orders (columns:
 |---|---|---|
 | `col(name)` | A column of the frame. | column reference |
 | `lit(value)` | A constant: number, bigint, string, `Uint8Array`, boolean, `null`. | literal |
-| `a.add(b)`, `.sub`, `.mul` | Arithmetic; int with int stays int, any real makes real. Integer overflow is an error *(proposed, decision E: the engine's `add` gives a real instead)*. | `add`, `sub`, `mul` |
+| `a.add(b)`, `.sub`, `.mul` | Arithmetic; int with int stays int, any real makes real. Integer overflow is an error. | `add_checked`, `sub_checked`, `mul_checked` |
 | `a.div(b)` | True division: always real. `7 / 2` is `3.5`. Division by zero gives null *(NaN once the engine keeps NaN)*. | `div_float` |
 | `a.floorDiv(b)` | Division rounded toward negative infinity: `-7 // 2` is `-4`. | `div_floor` |
 | `a.mod(b)` | Remainder with the sign of the divisor: `-7 % 2` is `1`. | `mod_floor` |
@@ -47,13 +47,13 @@ built. The error names the method (`filter: no column "qtty" in orders (columns:
 | `a.eqMissing(b)` | Equality where null equals null. | `cmp_is` |
 | `a.and(b)`, `.or(b)`, `.not()` | Logic with nulls (null and false is false; null or true is true). | `and`, `or`, `not` |
 | `a.isNull()`, `.isNotNull()` | Null tests; never null. | null test |
-| `a.cast(type)` | Conversion to `int`, `real`, `text`, `blob`. A value that doesn't convert is an error *(proposed, decision E: the engine's casts are lenient, `'x'` to `int` is 0)*. | `cast_*` |
+| `a.cast(type)` | Conversion to `int`, `real`, `text`, `blob`. A value that doesn't convert is an error. | `cast_integer_strict`, `cast_real_strict`, `cast_text`, `cast_blob` |
 | `a.alias(name)` | The same expression under another name. | — |
 | `a.round(digits)` | Rounding half to even. | `round_half_even` |
 | `a.str.lower()`, `.upper()` | Unicode case mapping. | `lower_unicode`, `upper_unicode` |
 | `a.str.contains(pattern)` | Whether a regular expression matches anywhere in the text. | `regex_match` |
 
-Comparisons and logic have type `bool` in smaltdf; `collect` gives `true` / `false` *(proposed, decision C)*.
+Comparisons and logic have type `bool` in smaltdf; `collect` gives `true` / `false`.
 
 ## Aggregation
 
@@ -62,12 +62,11 @@ table('orders').groupBy('region').agg(col('qty').sum().alias('qty'), col('price'
 ```
 
 `groupBy(...keys, { maintainOrder? })` gives one row per distinct key, with the keys first, then each aggregate.
-Groups come in no particular order unless `maintainOrder: true`, which gives them in order of each group's first row
-*(proposed, decision A)*.
+Groups come in no particular order unless `maintainOrder: true`, which gives them in order of each group's first row.
 
 | Aggregate | Meaning | Engine operation |
 |---|---|---|
-| `sum()` | Sum of the non-null values; 0 when there are none *(proposed, decision B)*. | `sum` |
+| `sum()` | Sum of the non-null values; 0 when there are none. | `sum`, then `coalesce` with 0 |
 | `mean()` | Mean of the non-null values; null when there are none. | `avg` |
 | `min()`, `max()` | Smallest, largest; null when there are none. | `min`, `max` |
 | `count()` | Number of non-null values. | `count` |

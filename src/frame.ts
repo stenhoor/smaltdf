@@ -5,6 +5,7 @@
 import * as p from 'smaltdb/plan';
 import type { AggCall, CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey, ValueColumn } from 'smaltdb/plan';
 import { DfError, fromEngine } from './errors.js';
+import { type CreateTableOptions, type InsertOptions, type WriteResult, createTable, insertInto } from './write.js';
 import { type AggNode, Expr, type Resolved, type ResolvedWindow, type Scope, col, hasAggregate, len, readsColumns, resolve, resolveAggregate, resolveWindow } from './expr.js';
 import { type DfColumn, type DfType, planType } from './types.js';
 
@@ -178,6 +179,16 @@ export class Frame {
   /** Columns turned into rows: one per column of `on` for each row, with its name and value. */
   unpivot(options: UnpivotOptions = {}): Frame {
     return this.withStep({ kind: 'unpivot', options });
+  }
+
+  /** Writes the frame's rows into `table`, by column name: other columns take their defaults. */
+  insertInto(db: Db, table: string, options: InsertOptions = {}): Promise<WriteResult> {
+    return insertInto(this, db, table, options);
+  }
+
+  /** A new table with the frame's columns and types, holding its rows; both in one transaction. */
+  createTable(db: Db, name: string, options: CreateTableOptions = {}): Promise<WriteResult> {
+    return createTable(this, db, name, options);
   }
 
   /** Rows drawn at random: `n` of them, or a `fraction`. */
@@ -701,7 +712,8 @@ function unique(step: string, rs: readonly Resolved[]): void {
 }
 
 /** The tables of `db`: the client's catalog snapshot, or the engine's catalog in process. */
-async function tablesOf(db: Db): Promise<Tables> {
+/** @internal */
+export async function tablesOf(db: Db): Promise<Tables> {
   if (typeof db.catalog === 'function') {
     const data = (await (db.catalog as () => Promise<CatalogData>).call(db)) as CatalogData;
     return (name) => data.tables.find((t) => t.name.toLowerCase() === name.toLowerCase());

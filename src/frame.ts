@@ -8,7 +8,7 @@ import { DfError, fromEngine } from './errors.js';
 import { type CreateTableOptions, type InsertOptions, type WriteResult, createTable, insertInto } from './write.js';
 import { type ViewOptions, createView } from './view.js';
 import { type AggNode, Expr, type Resolved, type ResolvedWindow, type Scope, col, hasAggregate, len, readsColumns, resolve, resolveAggregate, resolveWindow } from './expr.js';
-import { DF_LANGUAGE, type DfColumn, type DfType, planType } from './types.js';
+import { DF_LANGUAGE, type DfColumn, type DfType, listElement, planType, structFields } from './types.js';
 
 /** What a frame's statement is built and run with: an engine `Database` (in process) or a client `Database`. */
 export interface Db {
@@ -45,8 +45,17 @@ type Step =
   | { readonly kind: 'join'; readonly other: Frame; readonly options: JoinOptions }
   | { readonly kind: 'joinAsof'; readonly other: Frame; readonly options: AsofOptions }
   | { readonly kind: 'unpivot'; readonly options: UnpivotOptions }
+  | { readonly kind: 'explode'; readonly column: string; readonly options: ExplodeOptions }
+  | { readonly kind: 'unnest'; readonly column: string }
   | { readonly kind: 'pivot'; readonly on: string; readonly options: PivotOptions }
   | { readonly kind: 'sample'; readonly options: SampleOptions };
+
+export interface ExplodeOptions {
+  /** An empty list gives one row with null. Default false: none. */
+  readonly emptyAsNull?: boolean;
+  /** A null list gives one row with null. Default true. */
+  readonly keepNulls?: boolean;
+}
 
 export interface UnpivotOptions {
   /** Columns kept on every row. Default: none (with `on`), or the columns `on` doesn't name. */
@@ -183,6 +192,19 @@ export class Frame {
   /** Rows turned into columns: one per value of `on`, the cells from `values` (REFERENCE.md "Reshaping"). */
   pivot(on: string, options: PivotOptions): Frame {
     return this.withStep({ kind: 'pivot', on, options });
+  }
+
+  /**
+   * One row per element of list column `column`, the other columns repeated (REFERENCE.md "Lists and structs"). An empty
+   * list gives no row (one with null with `emptyAsNull`), a null list one row with null (none with `keepNulls: false`).
+   */
+  explode(column: string, options: ExplodeOptions = {}): Frame {
+    return this.withStep({ kind: 'explode', column, options });
+  }
+
+  /** Struct column `column` replaced by one column per field, named as the fields. */
+  unnest(column: string): Frame {
+    return this.withStep({ kind: 'unnest', column });
   }
 
   /** Columns turned into rows: one per column of `on` for each row, with its name and value. */
@@ -424,6 +446,28 @@ export class Frame {
         case 'unpivot':
           ({ op, columns } = unpivotStep({ op, columns }, this.source, step.options));
           break;
+        case 'explode': {
+          const [i] = pick('explode', this.source, columns, [step.column]);
+          const t = columns[i!]!.type;
+          const el = listElement(t);
+          if (el === undefined) throw new DfError('SMALTDF_TYPE', `explode: ${step.column} is ${t}, not a list`);
+          op = p.explode(op, i!, planType(t), { emptyAsNull: step.options.emptyAsNull ?? false, keepNulls: step.options.keepNulls ?? true });
+          columns = columns.map((c, k) => (k === i ? { name: c.name, type: el } : c));
+          break;
+        }
+        case 'unnest': {
+          const [i] = pick('unnest', this.source, columns, [step.column]);
+          const t = columns[i!]!.type;
+          const fields = structFields(t);
+          if (fields === undefined) throw new DfError('SMALTDF_TYPE', `unnest: ${step.column} is ${t}, not a struct`);
+          const read = (k: number): PlanExpr => p.col(0, k, planType(columns[k]!.type));
+          const exprs = columns.flatMap((c, k) => (k === i ? fields.map((f, j) => p.call('struct_field', [read(k), p.lit(j, 'int')], planType(f.type))) : [read(k)]));
+          const out = columns.flatMap((c, k) => (k === i ? fields.map((f) => ({ name: f.name, type: f.type })) : [c]));
+          if (new Set(out.map((c) => c.name)).size !== out.length) throw new DfError('SMALTDF_SCHEMA', `unnest: a field of ${step.column} has the name of another column`);
+          op = p.project(op, exprs);
+          columns = out;
+          break;
+        }
         case 'pivot':
           ({ op, columns } = pivotStep({ op, columns }, scope, step.on, step.options));
           break;
@@ -501,6 +545,48 @@ export function frame(data: FrameData): Frame {
   return new Frame({ kind: 'values', columns: columns.map(({ name, data, type }) => ({ name, data, type })), length }, []);
 }
 
+/**
+ * The type of JS values `vs` as a column (smaltdb ADR 0020): arrays are lists of their elements' type, plain objects
+ * structs of their fields (in first-seen order, each field's type from its values); NULLs fit any type.
+ */
+function valuesType(name: string, vs: readonly unknown[]): DfType {
+  const present = vs.filter((v) => v !== null && v !== undefined);
+  if (present.length === 0) return 'null';
+  const kinds = new Set(present.map((v) => (v instanceof Uint8Array ? 'blob' : v instanceof Date ? 'Date' : Array.isArray(v) ? 'array' : typeof v)));
+  if (kinds.size > 1 && !(kinds.size === 2 && kinds.has('number') && kinds.has('bigint'))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} mixes ${[...kinds].join(' and ')}`);
+  const k = [...kinds][0]!;
+  switch (k) {
+    case 'array': {
+      const inner = valuesType(`${name}[]`, (present as unknown[][]).flat(1));
+      return `list<${inner === 'null' ? 'any' : inner}>` as DfType;
+    }
+    case 'object': {
+      const names: string[] = [];
+      for (const o of present as Record<string, unknown>[]) for (const f of Object.keys(o)) if (!names.includes(f)) names.push(f);
+      if (names.length === 0) throw new DfError('SMALTDF_TYPE', `frame: column ${name} holds objects with no fields`);
+      for (const f of names) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(f)) throw new DfError('SMALTDF_TYPE', `frame: column ${name}: a field name is letters, digits and _, not ${JSON.stringify(f)}`);
+      const fields = names.map((f) => {
+        const t = valuesType(`${name}.${f}`, (present as Record<string, unknown>[]).map((o) => o[f]));
+        return `${f} ${t === 'null' ? 'any' : t}`;
+      });
+      return `struct<${fields.join(', ')}>` as DfType;
+    }
+    case 'boolean':
+      return 'bool';
+    case 'Date':
+      return 'datetime';
+    case 'string':
+      return 'text';
+    case 'blob':
+      return 'blob';
+    case 'number':
+    case 'bigint':
+      return present.every((v) => typeof v === 'bigint' || Number.isInteger(v)) ? 'int' : 'real';
+    default:
+      throw new DfError('SMALTDF_TYPE', `frame: column ${name} holds values of a kind smaltdf has no type for (${k})`);
+  }
+}
+
 /** A `datetime`'s result text (`2026-11-07 12:30:00.123456`) as a JS Date: ms, so finer digits are cut. */
 function dateOfText(text: string): Date {
   const m = /^([+-]?\d{4,})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?$/.exec(text);
@@ -518,8 +604,13 @@ function columnOf(name: string, values: ArrayLike<unknown> & Iterable<unknown>):
   if (values instanceof Float64Array || values instanceof Float32Array) return { data: values, type: 'real', length: values.length };
   if (INT_ARRAYS.some((k) => values instanceof k)) return { data: values as ValueColumn, type: 'int', length: values.length };
   const arr = Array.from(values);
-  const kinds = new Set<string>(arr.filter((v) => v !== null && v !== undefined).map((v) => (v instanceof Uint8Array ? 'blob' : v instanceof Date ? 'Date' : typeof v)));
+  const kinds = new Set<string>(arr.filter((v) => v !== null && v !== undefined).map((v) => (v instanceof Uint8Array ? 'blob' : v instanceof Date ? 'Date' : Array.isArray(v) ? 'array' : typeof v)));
   const kind = (k: string): boolean => kinds.has(k);
+  if (kinds.size === 1 && (kind('array') || kind('object'))) {
+    // Lists and structs (smaltdb ADR 0020): JS arrays and objects, their type read from the values.
+    const type = valuesType(name, arr);
+    return { data: arr.map((v) => (v === undefined ? null : v)) as ValueColumn & unknown[], type, length: arr.length };
+  }
   if ([...kinds].some((k) => !['number', 'bigint', 'string', 'boolean', 'blob', 'Date'].includes(k))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} holds values of a kind smaltdf has no type for (${[...kinds].join(', ')})`);
   if (kinds.size > 1 && !(kinds.size === 2 && kind('number') && kind('bigint'))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} mixes ${[...kinds].join(' and ')}`);
   // An integer in the safe range is a number, as the engine gives integers back; a bigint only beyond it.

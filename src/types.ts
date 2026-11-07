@@ -2,9 +2,27 @@
  * smaltdf's types: the engine's plan types (owner's decision C: comparisons and logic are `bool`, given as
  * `true` / `false`; the engine's `bool`, smaltdb ADR 0018).
  */
-import type { PlanType } from 'smaltdb/plan';
+import { type NestedTypeName, type PlanType, parseNested } from 'smaltdb/plan';
 
-export type DfType = 'int' | 'real' | 'num' | 'text' | 'blob' | 'bool' | 'null' | 'any' | TemporalType;
+export type DfType = 'int' | 'real' | 'num' | 'text' | 'blob' | 'bool' | 'null' | 'any' | TemporalType | NestedTypeName;
+
+/**
+ * Lists and structs (smaltdb ADR 0020): `list<T>` and `struct<name T, …>`, nested to any depth. Collect gives them as JS
+ * arrays and objects.
+ */
+export const isNested = (t: DfType): t is NestedTypeName => t.startsWith('list<') || t.startsWith('struct<');
+
+/** The element type of list type `t`, or undefined. */
+export function listElement(t: DfType): DfType | undefined {
+  const n = isNested(t) ? parseNested(t) : null;
+  return n && n.kind === 'list' ? (n.of as DfType) : undefined;
+}
+
+/** The fields of struct type `t`, or undefined. */
+export function structFields(t: DfType): readonly { name: string; type: DfType }[] | undefined {
+  const n = isNested(t) ? parseNested(t) : null;
+  return n && n.kind === 'struct' ? (n.fields as { name: string; type: DfType }[]) : undefined;
+}
 
 /**
  * Dates and times (smaltdb ADR 0019): a `date` is days since 1970-01-01, a `datetime` µs since 1970-01-01 00:00:00,

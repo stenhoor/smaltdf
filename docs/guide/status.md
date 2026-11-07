@@ -26,7 +26,9 @@ its own engine decision first. `bool` and NaN are in ([ADR 0018](https://smaltdb
 comparisons and logic are the engine's `bool`, a `bool` column written to a table reads back as `bool`, and NaN is a
 value of `real` that sorts after every number (`0 / 0` is NaN). So are dates and times
 ([ADR 0019](https://smaltdb.dev/adr/0019-dates-and-times)): `date`, `datetime`, `time` and `duration`, the `dt`
-methods, time zones as values, and JS `Date`s in and out ([Dates and times](../REFERENCE#dates-and-times)). Still to
-come: lists and structs, then `explode`.
+methods, time zones as values, and JS `Date`s in and out ([Dates and times](../REFERENCE#dates-and-times)). So are lists and
+structs ([ADR 0020](https://smaltdb.dev/adr/0020-lists-and-structs)): `list<…>` and `struct<…>` columns from JS arrays
+and objects, the `list` and `struct` methods, `implode`, `explode` and `unnest` ([Lists and
+structs](../REFERENCE#lists-and-structs)).
 
 Then the package name (`@smaltworks/smaltdf`) and the first release, together with smaltdb 0.9.0.

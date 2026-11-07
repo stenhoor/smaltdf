@@ -25,6 +25,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # The docs site: fails on dead links. It deploys from main (docs.yml).
+      - run: npm run docs:build
 
   # The Polars comparison tests (DESIGN.md decision D): Python with the pinned Polars, apart from npm run check.
   compare:

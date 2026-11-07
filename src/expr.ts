@@ -5,7 +5,7 @@
 import * as p from 'smaltdb/plan';
 import type { AggCall, PlanExpr, SortKey, WindowCall, WindowFrame } from 'smaltdb/plan';
 import { DfError, type DfOrigin } from './errors.js';
-import { type DfColumn, type DfType, type TemporalType, isNumeric, isTemporal, planType } from './types.js';
+import { type DfColumn, type DfType, type TemporalType, isNumeric, isTemporal, listElement, planType, structFields } from './types.js';
 
 /** A value an expression method takes: an expression, or a literal (`lit` is applied). */
 export type ExprLike = Expr | number | bigint | string | boolean | Uint8Array | Date | null;
@@ -46,7 +46,7 @@ export interface OverNode {
 }
 
 /** The aggregates (REFERENCE.md "Aggregation"). */
-export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'first' | 'last' | 'median' | 'std' | 'var';
+export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'first' | 'last' | 'median' | 'std' | 'var' | 'implode';
 
 /** @internal An aggregate of `arg` (none for `len`). */
 export interface AggNode {
@@ -131,6 +131,8 @@ export class Expr {
   /** The last value, in the group's order. */
   last(): Expr { return this.aggregate('last'); }
   median(): Expr { return this.aggregate('median'); }
+  /** The group's values as a list, in the group's order, nulls included. */
+  implode(): Expr { return this.aggregate('implode'); }
   /** The sample standard deviation. */
   std(): Expr { return this.aggregate('std'); }
   /** The sample variance. */
@@ -179,6 +181,35 @@ export class Expr {
     };
   }
 
+  /** List methods (REFERENCE.md "Lists and structs"). */
+  get list(): ListMethods {
+    const m = (name: string, ...args: ExprLike[]) => this.op(`list.${name}`, ...args);
+    return {
+      len: () => m('len'),
+      get: (index: ExprLike) => m('get', index),
+      first: () => m('get', 0),
+      last: () => m('get', -1),
+      contains: (item: ExprLike) => m('contains', item),
+      slice: (offset: ExprLike, length?: ExprLike) => (length === undefined ? m('slice', offset) : m('slice', offset, length)),
+      head: (n = 5) => m('slice', 0, n),
+      tail: (n = 5) => m('slice', -n),
+      concat: (other: ExprLike) => m('concat', other),
+      join: (separator: string) => m('join', separator),
+      sort: (options: { descending?: boolean } = {}) => m('sort', options.descending ?? false),
+      unique: () => m('unique'),
+      reverse: () => m('reverse'),
+      sum: () => m('sum'),
+      mean: () => m('mean'),
+      min: () => m('min'),
+      max: () => m('max'),
+    };
+  }
+
+  /** Struct methods. */
+  get struct(): { field(name: string): Expr } {
+    return { field: (name: string) => this.op('struct.field', name) };
+  }
+
   /** Date and time methods (REFERENCE.md "Dates and times"). */
   get dt(): DtMethods {
     const part = (name: string) => () => this.op(`dt.${name}`);
@@ -202,6 +233,36 @@ export class Expr {
       zoneOffset: (zone: ExprLike) => this.op('dt.zoneOffset', zone),
     };
   }
+}
+
+/** The `list` methods of an expression of lists. */
+export interface ListMethods {
+  /** The number of elements. */
+  len(): Expr;
+  /** The element at `index` (from 0; negative from the end), or null out of range. */
+  get(index: ExprLike): Expr;
+  first(): Expr;
+  last(): Expr;
+  /** Whether an element equals `item`. */
+  contains(item: ExprLike): Expr;
+  /** The elements from `offset` (negative from the end), `length` of them or to the end. */
+  slice(offset: ExprLike, length?: ExprLike): Expr;
+  head(n?: number): Expr;
+  tail(n?: number): Expr;
+  /** This list, then `other`. */
+  concat(other: ExprLike): Expr;
+  /** The non-null elements as text, joined by `separator`. */
+  join(separator: string): Expr;
+  /** The elements sorted, nulls first. */
+  sort(options?: { descending?: boolean }): Expr;
+  /** The elements without repeats, the first of each, in order. */
+  unique(): Expr;
+  reverse(): Expr;
+  /** Over the non-null elements: the sum (0 for none), the mean, the least and the greatest. */
+  sum(): Expr;
+  mean(): Expr;
+  min(): Expr;
+  max(): Expr;
 }
 
 /** The `dt` methods of an expression of dates and times. */
@@ -395,7 +456,7 @@ export function readsColumns(e: Expr | string): boolean {
   return typeof e === 'string' || walk(e.node);
 }
 
-const AGG_FNS: Readonly<Record<AggFn, string>> = { sum: 'sum', mean: 'avg', min: 'min', max: 'max', count: 'count', len: 'count', first: 'first', last: 'last', median: 'median', std: 'stddev_samp', var: 'var_samp' };
+const AGG_FNS: Readonly<Record<AggFn, string>> = { implode: 'implode', sum: 'sum', mean: 'avg', min: 'min', max: 'max', count: 'count', len: 'count', first: 'first', last: 'last', median: 'median', std: 'stddev_samp', var: 'var_samp' };
 
 /** An aggregate resolved against the rows it aggregates (`input`): its call, its smaltdf type, and its name. */
 export function resolveAggregate(n: AggNode, input: Scope): { call: AggCall; type: DfType; name: string } {
@@ -421,6 +482,9 @@ export function resolveAggregate(n: AggNode, input: Scope): { call: AggCall; typ
       break;
     case 'count':
       type = 'int';
+      break;
+    case 'implode':
+      type = `list<${a.type === 'null' ? 'any' : a.type}>` as DfType;
       break;
     default:
       type = a.type;
@@ -507,9 +571,68 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
       const marked = p.call('text_concat', [a.plan, p.call('text_concat', [p.lit(' (format ', 'text'), p.call('text_concat', [b.plan, p.lit(')', 'text')], 'text')], 'text')], 'text');
       return out(p.call(cast, [p.call('coalesce', [parsed, marked], 'any')], t), t);
     }
+    case 'struct.field': {
+      const fields = structFields(a.type);
+      need(fields !== undefined, 'takes a struct');
+      const name = b!.plan.k === 'lit' ? String(b!.plan.value) : '';
+      const i = fields!.findIndex((f) => f.name === name);
+      if (i < 0) throw new DfError('SMALTDF_SCHEMA', `${scope.step}: struct.field: ${a.type} has no field "${name}" (fields: ${fields!.map((f) => f.name).join(', ')})`);
+      const t = fields![i]!.type;
+      return { ...out(p.call('struct_field', [a.plan, p.lit(i, 'int')], planType(t)), t), name };
+    }
     default:
+      if (m.startsWith('list.')) return resolveList(m.slice(5), args, scope, out, need);
       if (m.startsWith('dt.')) return resolveDt(m.slice(3), args, scope, out, need);
       throw new DfError('SMALTDF_TYPE', `${scope.step}: unknown method ${m}`);
+  }
+}
+
+function resolveList(
+  name: string,
+  args: readonly Resolved[],
+  scope: Scope,
+  out: (plan: PlanExpr, type: DfType) => Resolved,
+  need: (ok: boolean, what: string) => void,
+): Resolved {
+  const [a, b] = args as [Resolved, Resolved | undefined];
+  const el = listElement(a.type);
+  need(el !== undefined || a.type === 'null', 'takes a list');
+  const elem = el ?? 'any';
+  const call = (fn: string, type: DfType) => out(p.call(fn, args.map((x) => x.plan), planType(type)), type);
+  switch (name) {
+    case 'len':
+      return call('list_len', 'int');
+    case 'get':
+      need(b!.type === 'int', 'takes a list and a whole-number index');
+      return call('list_get', elem);
+    case 'contains':
+      need(comparable(elem, b!.type), 'looks for a value of the list\'s element type');
+      return out(p.call('list_contains', [a.plan, b!.plan], 'int'), 'bool');
+    case 'slice':
+      need(args.slice(1).every((x) => x.type === 'int'), 'takes a whole-number offset and length');
+      return call('list_slice', a.type);
+    case 'concat':
+      need(b!.type === a.type || b!.type === 'null', 'joins two lists of one type');
+      return call('list_concat', a.type);
+    case 'join':
+      need(elem === 'text' || elem === 'any', 'joins a list of text');
+      return call('list_join', 'text');
+    case 'sort':
+      return out(p.call('list_sort', [a.plan, p.lit(b!.plan.k === 'lit' && b!.plan.value === 1 ? 1 : 0, 'int')], planType(a.type)), a.type);
+    case 'unique':
+    case 'reverse':
+      return call(`list_${name}`, a.type);
+    case 'sum':
+      need(isNumeric(elem) || elem === 'bool', 'takes a list of numbers');
+      return call('list_sum', elem === 'real' ? 'real' : elem === 'int' || elem === 'bool' ? 'int' : 'num');
+    case 'mean':
+      need(isNumeric(elem) || elem === 'bool', 'takes a list of numbers');
+      return call('list_mean', 'real');
+    case 'min':
+    case 'max':
+      return call(`list_${name}`, elem);
+    default:
+      throw new DfError('SMALTDF_TYPE', `${scope.step}: unknown method list.${name}`);
   }
 }
 

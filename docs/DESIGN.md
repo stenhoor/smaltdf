@@ -55,7 +55,7 @@ and columnar tables, in process and over the worker, and with no SQL registered.
    job (decision D).
 
 Types beyond the engine's first ones follow smaltdb ADR 0016 step 11, one type at a time: `bool` and NaN (ADR 0018) and
-dates and times (ADR 0019) are in; lists and structs are next.
+dates and times (ADR 0019) and lists and structs (ADR 0020) are in.
 
 ## Owner's decisions (2026-11-07)
 

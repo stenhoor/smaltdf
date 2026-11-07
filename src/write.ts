@@ -3,11 +3,11 @@
  * is a plan statement; a new table and its rows are written in one transaction.
  */
 import * as p from 'smaltdb/plan';
-import type { CatalogTable, ColumnDef, ConflictAction, PlanStatementInput, StorageType } from 'smaltdb/plan';
+import type { CatalogTable, ColumnDef, ConflictAction, NestedTypeName, PlanStatementInput, StorageType } from 'smaltdb/plan';
 import { DfError, fromEngine } from './errors.js';
 import { type Expr, type Scope, lit, resolve } from './expr.js';
 import { type Db, type Frame, type Tables, tablesOf } from './frame.js';
-import { type DfColumn, type DfType, planType } from './types.js';
+import { type DfColumn, type DfType, listElement, planType, structFields } from './types.js';
 
 /** What a write did: the number of rows it wrote, changed or deleted. */
 export interface WriteResult {
@@ -27,7 +27,11 @@ export interface CreateTableOptions {
 }
 
 /** The storage type a smaltdf type is kept as in a new table. */
-const STORAGE: Readonly<Record<DfType, StorageType>> = { int: 'INTEGER', bool: 'BOOLEAN', real: 'REAL', num: 'NUMERIC', text: 'TEXT', blob: 'BLOB', null: 'ANY', any: 'ANY', date: 'DATE', datetime: 'DATETIME', time: 'TIME', duration: 'DURATION' };
+const STORAGE: Readonly<Record<Exclude<DfType, NestedTypeName>, StorageType>> = { int: 'INTEGER', bool: 'BOOLEAN', real: 'REAL', num: 'NUMERIC', text: 'TEXT', blob: 'BLOB', null: 'ANY', any: 'ANY', date: 'DATE', datetime: 'DATETIME', time: 'TIME', duration: 'DURATION' };
+
+/** The storage type of a column of type `t`: lists and structs keep their full type as the declared type. */
+const storageOf = (t: DfType): StorageType => (t.startsWith('list<') ? 'LIST' : t.startsWith('struct<') ? 'STRUCT' : STORAGE[t as Exclude<DfType, NestedTypeName>]);
+const declaredOf = (t: DfType): string => (t.startsWith('list<') || t.startsWith('struct<') ? t : STORAGE[t as Exclude<DfType, NestedTypeName>]);
 
 /** Whether a column of type `t` may be written into a table column stored as `s` without changing its values' kind. */
 function fits(t: DfType, s: StorageType): boolean {
@@ -46,7 +50,7 @@ function fits(t: DfType, s: StorageType): boolean {
       return s === 'BLOB';
     default:
       // A date or time goes into its own storage type only.
-      return s === STORAGE[t];
+      return s === storageOf(t);
   }
 }
 
@@ -56,6 +60,18 @@ function target(tables: Tables, step: string, name: string): CatalogTable {
   return t;
 }
 
+/**
+ * Whether values of type `t` go into a column of list or struct type `into`: the same type, where `t` may know less
+ * (`any` elements, as an empty list has, or null).
+ */
+function nestedFits(t: DfType, into: DfType): boolean {
+  if (t === into || t === 'null' || t === 'any') return true;
+  const [lt, li] = [listElement(t), listElement(into)];
+  if (lt !== undefined && li !== undefined) return nestedFits(lt, li);
+  const [ft, fi] = [structFields(t), structFields(into)];
+  return ft !== undefined && fi !== undefined && ft.length === fi.length && ft.every((f, k) => f.name === fi[k]!.name && nestedFits(f.type, fi[k]!.type));
+}
+
 /** The frame's columns as columns of `t`, by name; each must fit its column's storage. */
 function columnsInto(step: string, t: CatalogTable, columns: readonly DfColumn[]): number[] {
   return columns.map((c) => {
@@ -63,6 +79,8 @@ function columnsInto(step: string, t: CatalogTable, columns: readonly DfColumn[]
     if (i < 0) throw new DfError('SMALTDF_SCHEMA', `${step}: ${t.name} has no column "${c.name}" (columns: ${t.columns.map((x) => x.name).join(', ')})`);
     const s = t.columns[i]!.storageType;
     if (!fits(c.type, s)) throw new DfError('SMALTDF_TYPE', `${step}: column ${c.name} is ${c.type}, and ${t.name}.${c.name} holds ${s}`);
+    // A list or struct goes into a column of its own type only (the engine stores any list's bytes in a LIST column).
+    if ((s === 'LIST' || s === 'STRUCT') && !nestedFits(c.type, t.columns[i]!.type as DfType)) throw new DfError('SMALTDF_TYPE', `${step}: column ${c.name} is ${c.type}, and ${t.name}.${c.name} holds ${t.columns[i]!.type}`);
     return i;
   });
 }
@@ -112,7 +130,7 @@ export async function createTable(frame: Frame, db: Db, name: string, options: C
   const tables = await tablesOf(db);
   if (options.ifNotExists && tables(name)) return { rows: 0 };
   const { statement, columns } = (await frame.resolved(db, tables)).build(tables);
-  const defs: ColumnDef[] = columns.map((c) => ({ name: c.name, declaredType: STORAGE[c.type], type: STORAGE[c.type], notNull: false, collation: 'binary' }));
+  const defs: ColumnDef[] = columns.map((c) => ({ name: c.name, declaredType: declaredOf(c.type), type: storageOf(c.type), notNull: false, collation: 'binary' }));
   const create: PlanStatementInput = { kind: 'schema', op: { op: 'createTable', table: { name, columns: defs, keys: [], checks: [], foreignKeys: [], storage: options.storage ?? 'row' }, temp: false, ifNotExists: false } };
   const fill: PlanStatementInput = { kind: 'write', plan: p.append(name, (statement as { plan: p.PlanOp }).plan, columns.map((_, i) => i)) };
   return { rows: await runStatements(db, [create, fill]) };

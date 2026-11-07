@@ -94,6 +94,33 @@ stores them as `DATE`, `DATETIME`, `TIME` and `DURATION`.
 - **Comparisons:** values of the same type compare. Text compared with a `date` or `datetime` is read as one, and
   text that isn't one is an error: `col('ts').ge('2026-01-01 00:00:00')`.
 
+## Lists and structs
+
+Two kinds of types hold values of other types ([smaltdb ADR 0020](https://smaltdb.dev/adr/0020-lists-and-structs)):
+`list<T>`, a list of `T` values, and `struct<name T, …>`, named fields, nested to any depth. `frame(...)` reads a column
+of JS arrays as a list and of plain objects as a struct, its type from the values (`[['a'], []]` is `list<text>`, an
+all-empty column `list<any>`); `collect` gives them back as arrays and objects. A table that `createTable` makes stores
+them as `LIST` and `STRUCT`, and a write into one takes values of its own type only.
+
+| Expression | Meaning | Engine operation |
+|---|---|---|
+| `a.list.len()` | The number of elements. | `list_len` |
+| `a.list.get(i)`, `.first()`, `.last()` | The element at `i` (from 0; negative from the end), or null out of range. | `list_get` |
+| `a.list.contains(v)` | Whether an element equals `v`. | `list_contains` |
+| `a.list.slice(offset, length?)`, `.head(n)`, `.tail(n)` | Elements from `offset` (negative from the end). | `list_slice` |
+| `a.list.concat(b)` | `a`'s elements, then `b`'s. | `list_concat` |
+| `a.list.join(sep)` | A list of text's non-null elements joined by `sep`. | `list_join` |
+| `a.list.sort({ descending? })` | The elements sorted, nulls first. | `list_sort` |
+| `a.list.unique()`, `.reverse()` | Without repeats (the first of each, in order); reversed. | `list_unique`, `list_reverse` |
+| `a.list.sum()`, `.mean()`, `.min()`, `.max()` | Over the non-null elements: the sum (0 for none), the mean, the least, the greatest. | `list_sum` … |
+| `a.struct.field(name)` | A struct's field. | `struct_field` |
+| `a.implode()` | An aggregate: the group's values as a list, in the group's order, nulls included. | `implode` |
+
+| Frame method | Meaning |
+|---|---|
+| `explode(column, { emptyAsNull?, keepNulls? })` | One row per element of list column `column`, the other columns repeated, in the frame's order then the list's. An empty list gives no row (one row with null with `emptyAsNull`), a null list one row with null (none with `keepNulls: false`). |
+| `unnest(column)` | Struct column `column` replaced by one column per field, named as the fields. |
+
 ## Aggregation
 
 ```ts
@@ -295,7 +322,7 @@ when they give their column names (their types are then `any`).
 
 ## Not yet in the language
 
-Lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
+Every type of smaltdb ADR 0016 step 11 is in: `bool` and NaN, dates and times, lists and structs.
 
 ## Compared with Polars
 
@@ -305,8 +332,8 @@ true. Order is compared too, except where neither side promises one (`groupBy` a
 
 <!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->
 
-With Polars 2.1.0, 60 of the 68 cases give the same columns, types and rows (or both an
-error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`, `dt.year`, `dt.hour`, `dt.date`, `dt.truncate`, `dt.offsetBy`, `dt.strftime`, `sub`, `gt`, `str.toDatetime`, `str.toDate`, `dt.toZone`, `dt.fromZone`.
+With Polars 2.1.0, 72 of the 80 cases give the same columns, types and rows (or both an
+error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`, `dt.year`, `dt.hour`, `dt.date`, `dt.truncate`, `dt.offsetBy`, `dt.strftime`, `sub`, `gt`, `str.toDatetime`, `str.toDate`, `dt.toZone`, `dt.fromZone`, `list.len`, `list.contains`, `list.sort`, `list.unique`, `list.sum`, `list.join`, `list.slice`, `list.concat`, `explode`, `implode`, `struct.field`, `unnest`.
 
 These differ:
 

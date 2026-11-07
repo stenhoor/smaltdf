@@ -3,7 +3,7 @@
  * A case is the same unless it says how the two differ (`differs`); compare.test.ts checks both ways, and writes the
  * differences into docs/REFERENCE.md ("Compared with Polars").
  */
-import { col, concat, len, lit, table, type Frame } from '../src/index.js';
+import { col, concat, frame, len, lit, table, type Frame } from '../src/index.js';
 
 /** A table as both sides make it: columns typed `int`, `real`, `text`, `date` or `datetime` (as result text). */
 export interface CompareTable {
@@ -51,6 +51,9 @@ export interface Case {
 const o = () => table('orders');
 const n = () => table('nums');
 const e = () => table('events');
+/** Lists and structs come from JavaScript data on both sides (the tables hold no list columns). */
+const lists = () => frame({ id: [1, 2, 3, 4], v: [[3, 1, 2], [], null, [5, null, 5]], t: [['a', 'b'], [], null, ['c']], pt: [{ x: 1, y: 2.5 }, { x: 3, y: null }, null, { x: 0, y: 0 }] });
+const LISTS = "pl.DataFrame({'id': [1, 2, 3, 4], 'v': [[3, 1, 2], [], None, [5, None, 5]], 't': [['a', 'b'], [], None, ['c']], 'pt': [{'x': 1, 'y': 2.5}, {'x': 3, 'y': None}, None, {'x': 0, 'y': 0.0}]})";
 
 export const CASES: readonly Case[] = [
   // Frames
@@ -133,4 +136,19 @@ export const CASES: readonly Case[] = [
   { id: 'str-to-date-strict', fn: 'str.toDate', df: e().select(col('s').str.toDate('%Y-%m-%d')), polars: "t['events'].select(pl.col('s').str.to_date('%Y-%m-%d'))" },
   { id: 'dt-to-zone', fn: 'dt.toZone', df: e().select(col('ts').dt.toZone('America/New_York')), polars: "t['events'].select(pl.col('ts').dt.replace_time_zone('UTC').dt.convert_time_zone('America/New_York').dt.replace_time_zone(None))" },
   { id: 'dt-from-zone', fn: 'dt.fromZone', df: e().select(col('ts').dt.fromZone('Asia/Kolkata')), polars: "t['events'].select(pl.col('ts').dt.replace_time_zone('Asia/Kolkata').dt.convert_time_zone('UTC').dt.replace_time_zone(None))" },
+
+  // Lists and structs
+  { id: 'list-len-get', fn: 'list.len', df: lists().select(col('v').list.len(), col('v').list.get(0).alias('g'), col('v').list.last().alias('l')), polars: `${LISTS}.select(pl.col('v').list.len(), pl.col('v').list.get(0, null_on_oob=True).alias('g'), pl.col('v').list.last().alias('l'))` },
+  { id: 'list-contains', fn: 'list.contains', df: lists().select(col('v').list.contains(5)), polars: `${LISTS}.select(pl.col('v').list.contains(5))` },
+  { id: 'list-sort', fn: 'list.sort', df: lists().select(col('v').list.sort(), col('v').list.sort({ descending: true }).alias('d')), polars: `${LISTS}.select(pl.col('v').list.sort(), pl.col('v').list.sort(descending=True).alias('d'))` },
+  { id: 'list-unique', fn: 'list.unique', df: lists().select(col('v').list.unique()), polars: `${LISTS}.select(pl.col('v').list.unique(maintain_order=True))` },
+  { id: 'list-reduce', fn: 'list.sum', df: lists().select(col('v').list.sum(), col('v').list.mean().alias('mean'), col('v').list.min().alias('min'), col('v').list.max().alias('max')), polars: `${LISTS}.select(pl.col('v').list.sum(), pl.col('v').list.mean().alias('mean'), pl.col('v').list.min().alias('min'), pl.col('v').list.max().alias('max'))` },
+  { id: 'list-join', fn: 'list.join', df: lists().select(col('t').list.join('+')), polars: `${LISTS}.select(pl.col('t').list.join('+'))` },
+  { id: 'list-slice', fn: 'list.slice', df: lists().select(col('v').list.slice(1), col('v').list.head(2).alias('h'), col('v').list.tail(1).alias('tl')), polars: `${LISTS}.select(pl.col('v').list.slice(1), pl.col('v').list.head(2).alias('h'), pl.col('v').list.tail(1).alias('tl'))` },
+  { id: 'list-concat', fn: 'list.concat', df: lists().select(col('v').list.concat(col('v'))), polars: `${LISTS}.select(pl.col('v').list.concat(pl.col('v')))` },
+  { id: 'explode', fn: 'explode', df: lists().select('id', 't').explode('t'), polars: `${LISTS}.select('id', 't').explode('t')` },
+  { id: 'implode', fn: 'implode', df: lists().select('id', 't').explode('t').groupBy('id', { maintainOrder: true }).agg(col('t').implode()), polars: `${LISTS}.select('id', 't').explode('t').group_by('id', maintain_order=True).agg(pl.col('t'))` },
+  { id: 'struct-field', fn: 'struct.field', df: lists().select(col('pt').struct.field('y')), polars: `${LISTS}.select(pl.col('pt').struct.field('y'))` },
+  { id: 'unnest', fn: 'unnest', df: lists().select('id', 'pt').unnest('pt'), polars: `${LISTS}.select('id', 'pt').unnest('pt')` },
+
 ];

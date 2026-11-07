@@ -32,6 +32,10 @@ def kind(dtype: pl.DataType) -> str:
         return "time"
     if isinstance(dtype, pl.Duration):
         return "duration"
+    if isinstance(dtype, pl.List):
+        return f"list<{kind(dtype.inner)}>"
+    if isinstance(dtype, pl.Struct):
+        return "struct<" + ", ".join(f"{f.name} {kind(f.dtype)}" for f in dtype.fields) + ">"
     return str(dtype)
 
 
@@ -73,6 +77,10 @@ def value(v):
         return clock(((v.hour * 60 + v.minute) * 60 + v.second) * 1_000_000 + v.microsecond)
     if isinstance(v, dt.timedelta):
         return duration(v)
+    if isinstance(v, list):
+        return [value(x) for x in v]
+    if isinstance(v, dict):
+        return {k: value(x) for k, x in v.items()}
     if isinstance(v, int):
         return v if abs(v) <= 2**53 else {"$int": str(v)}
     if isinstance(v, float):

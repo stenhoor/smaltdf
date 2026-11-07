@@ -1,6 +1,6 @@
 /**
- * smaltdf's types: the engine's plan types, and `bool` (owner's decision C: comparisons and logic are `bool`, given
- * as `true` / `false`, carried as the engine's integers 0 / 1 until it has a `bool` type).
+ * smaltdf's types: the engine's plan types (owner's decision C: comparisons and logic are `bool`, given as
+ * `true` / `false`; the engine's `bool`, smaltdb ADR 0018).
  */
 import type { PlanType } from 'smaltdb/plan';
 
@@ -12,9 +12,9 @@ export interface DfColumn {
   readonly type: DfType;
 }
 
-/** The plan type a smaltdf type travels as. */
+/** The plan type a smaltdf type travels as: the same (the engine has `bool` since smaltdb ADR 0018). */
 export function planType(t: DfType): PlanType {
-  return t === 'bool' ? 'int' : t;
+  return t;
 }
 
 /** A numeric type, or one only known when the statement runs (`num`, `any`). */

@@ -29,8 +29,9 @@ describe.each(KINDS)('%s', (kind) => {
     const r = await frame({ a: new Int32Array([1, 2, 3]), b: [1.5, null, 3], c: ['x', 'y', null], d: [true, false, null], e: [1n, 2, 9007199254740993n] }).collect(db);
     expect(r.types).toEqual(['int', 'real', 'text', 'bool', 'int']);
     expect(r.rows).toEqual([[1, 1.5, 'x', true, 1], [2, null, 'y', false, 2], [3, 3, null, null, 9007199254740993n]]);
+    // NaN is a value of real, after every number (smaltdb ADR 0018): NaN > 1, as in Polars.
     const f = await frame({ x: new Float64Array([1, Number.NaN, 2.5]) }).filter(col('x').gt(1)).collect(db);
-    expect(f.rows).toEqual([[2.5]]);
+    expect(f.rows).toEqual([[Number.NaN], [2.5]]);
   });
 
   it('frame: joins tables and runs every method', async () => {

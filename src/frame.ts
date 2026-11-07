@@ -315,7 +315,8 @@ export class Frame {
       throw fromEngine(err);
     }
     const bools = columns.map((c) => c.type === 'bool');
-    const rows = raw.rows.map((r) => r.map((v, i) => (bools[i] && v !== null ? v !== 0 && v !== 0n : v)));
+    // The engine gives a bool column as booleans (smaltdb ADR 0018); 0 / 1 from a column it types int read as one too.
+    const rows = raw.rows.map((r) => r.map((v, i) => (bools[i] && v !== null && typeof v !== 'boolean' ? v !== 0 && v !== 0n : v)));
     const names = columns.map((c) => c.name);
     return {
       columns: names,

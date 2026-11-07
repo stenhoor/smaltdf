@@ -379,14 +379,14 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
     case 'and':
     case 'or':
       need(isBool(a.type) && isBool(b!.type), 'takes bool values');
-      return out(m === 'and' ? p.and(a.plan, b!.plan) : p.or(a.plan, b!.plan), 'bool');
+      return out(p.typed(m === 'and' ? p.and(a.plan, b!.plan) : p.or(a.plan, b!.plan), 'bool'), 'bool');
     case 'not':
       need(isBool(a.type), 'takes a bool value');
-      return out(p.not(a.plan), 'bool');
+      return out(p.typed(p.not(a.plan), 'bool'), 'bool');
     case 'isNull':
-      return out(p.isNull(a.plan), 'bool');
+      return out(p.typed(p.isNull(a.plan), 'bool'), 'bool');
     case 'isNotNull':
-      return out(p.isNotNull(a.plan), 'bool');
+      return out(p.typed(p.isNotNull(a.plan), 'bool'), 'bool');
     case 'round':
       need(isNumeric(a.type) && (b!.type === 'int' || b!.type === 'null'), 'takes a number and a whole number of digits');
       return out(p.call('round_half_even', [a.plan, b!.plan], 'real'), 'real');

@@ -1,6 +1,10 @@
-// @smaltdb/df: a TypeScript language for smaltdb with dataframe interfaces.
-//
-// smaltdf builds plans for smaltdb's shared engine plan layer (smaltdb ADR 0014, proposed). Nothing in smaltdf
-// generates or runs SQL. The language arrives once that layer is in smaltdb (ADR 0014 §5, step 9); see
-// docs/DESIGN.md.
-export {};
+/**
+ * @smaltdb/df: a TypeScript language for smaltdb with dataframe interfaces (docs/REFERENCE.md).
+ *
+ * smaltdf builds plans for smaltdb's engine plan layer (`smaltdb/plan`) and runs them with `queryPlan`. Nothing in
+ * smaltdf generates or runs SQL.
+ */
+export { type DfResult, type Db, Frame, type SortOptions, table } from './frame.js';
+export { type CastType, Expr, type ExprLike, col, lit } from './expr.js';
+export { DfError } from './errors.js';
+export type { DfColumn, DfType } from './types.js';

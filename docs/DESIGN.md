@@ -22,7 +22,7 @@ smaltui and, later, smaltnb are how people use it interactively.
 | 6 | Testing | Tests check smaltdf against its own spec. Where a smaltdf function overlaps a Polars function, a comparison test runs both and documents the differences, so users can see them. The same query must give the same result on row and columnar storage, in process and over the worker, and with no SQL language registered. |
 | 7 | Visuals | None: smaltdf has no display. Brand assets from `stenhoor/smalt-brand` are used only for its README and docs. |
 | 8 | Frames | A frame is a description of a computation, not data: building one runs nothing. `collect(db)` builds its plan, runs it, and gives a result. `plan()` gives the plan statement itself, for `preparePlan`, a plugin, or inspection. |
-| 9 | Schema | smaltdf knows every column's smaltdf type while it builds a frame: tables' columns come from the engine's catalog API (`catalog()` on the client, `Database.catalog` in process), and each expression's type follows from the spec. A wrong column name or type is an error when the frame is built, naming the method. |
+| 9 | Schema | smaltdf knows every column's smaltdf type when it builds a frame's plan (`plan` / `collect`): tables' columns come from the engine's catalog API (`catalog()` on the client, `Database.catalog` in process), and each expression's type follows from the spec. A wrong column name or type is an error then, before anything runs, naming the method. |
 | 10 | Errors | smaltdf's errors name the smaltdf call that caused them: plan nodes carry an `origin` (ADR 0016 §10) that smaltdf maps back to the method and its arguments. |
 
 ## Superseded

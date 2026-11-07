@@ -21,7 +21,7 @@ const result = await big.collect(db); // db: a smaltdb Database, in process or t
 
 | Method | Meaning |
 |---|---|
-| `table(name, { schema? })` | The rows of a table or view, in storage order (rowid order for row tables). |
+| `table(name)` | The rows of a table, in storage order (rowid order for row tables). |
 | `select(...exprs)` | One column per expression, in that order. A string is `col(name)`. |
 | `withColumns(...exprs)` | The frame's columns, with these added at the end or replacing a column of the same name in place. |
 | `filter(...predicates)` | The rows where every predicate is true (not false, not null). Keeps order. |
@@ -30,8 +30,10 @@ const result = await big.collect(db); // db: a smaltdb Database, in process or t
 | `collect(db)` | Runs the frame. Resolves to `{ columns, types, rows }` and a `toObjects()` helper. |
 | `plan()` | The plan statement (`PlanStatementInput`) the frame runs as. |
 
-A column name that doesn't exist, or an expression of the wrong type for its method, is an error when the frame is
-built. The error names the method (`filter: no column "qtty" in orders (columns: id, qty, price)`).
+A column name that doesn't exist, or an expression of the wrong type for its method, is an error when the frame's
+plan is built (`plan` or `collect`, before anything runs): the columns come from the database's catalog. The error
+names the method (`filter: no column "qtty" in orders (columns: id, qty, price)`), and so do the engine's errors
+while it runs (`select: add: integer overflow in add_checked`).
 
 ## Expressions
 
@@ -40,7 +42,7 @@ built. The error names the method (`filter: no column "qtty" in orders (columns:
 | `col(name)` | A column of the frame. | column reference |
 | `lit(value)` | A constant: number, bigint, string, `Uint8Array`, boolean, `null`. | literal |
 | `a.add(b)`, `.sub`, `.mul` | Arithmetic; int with int stays int, any real makes real. Integer overflow is an error. | `add_checked`, `sub_checked`, `mul_checked` |
-| `a.div(b)` | True division: always real. `7 / 2` is `3.5`. Division by zero gives null *(NaN once the engine keeps NaN)*. | `div_float` |
+| `a.div(b)` | True division: always real. `7 / 2` is `3.5`. A non-zero value divided by zero is `Infinity` or `-Infinity`; `0 / 0` is null *(NaN once the engine keeps NaN)*. | `div_float` |
 | `a.floorDiv(b)` | Division rounded toward negative infinity: `-7 // 2` is `-4`. | `div_floor` |
 | `a.mod(b)` | Remainder with the sign of the divisor: `-7 % 2` is `1`. | `mod_floor` |
 | `a.eq(b)`, `.ne`, `.lt`, `.le`, `.gt`, `.ge` | Comparison. With a null operand the result is null. | `cmp_eq` … |

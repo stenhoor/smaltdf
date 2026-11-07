@@ -52,25 +52,21 @@ and columnar tables, in process and over the worker, and with no SQL registered.
 Types beyond the engine's current ones (`bool`, NaN as a value, dates and times, lists and structs) follow smaltdb
 ADR 0016 step 11, one type at a time. Until `bool` lands, see decision C below.
 
-## Decisions for the owner
+## Owner's decisions (2026-11-07)
 
-- **A. Order defaults.** smaltdf frames are ordered. Proposed: `filter`, `select`, `withColumns`, `sort` (stable),
-  `head` / `tail` keep order (free in the engine); `groupBy` and `join` give rows in no particular order unless asked
-  (`groupBy(…, { maintainOrder: true })`, `join(…, { maintainOrder: true })`), because keeping it costs (ADR 0016 §4).
-  The alternative is ordered by default, slower.
-- **B. Aggregates of no values.** The engine's `sum` of no rows is NULL. Proposed: smaltdf's `sum` of no values is 0
-  (and `count` is 0, `mean` / `min` / `max` NULL), which needs an engine operation `sum_or_zero` or the plan
-  `coalesce(sum, 0)` typed by the input. Decide the meaning; the mapping follows.
-- **C. Booleans before the `bool` type.** Comparisons give the engine's `int` 0 / 1 today. Proposed: smaltdf types
-  them as `bool` itself and converts results to `true` / `false` in `collect`, so its results don't change when the
-  engine's `bool` arrives. The alternative is 0 / 1 until then.
-- **D. Polars in tests.** Comparison tests need Polars (Python) at test time. Proposed: a separate CI job with Python
-  and `polars` pinned, not part of `npm run check`, writing the differences into the reference. Nothing of Polars is
-  a dependency of the package.
-- **E. Strict arithmetic and conversion.** The engine's `add` / `sub` / `mul` turn an integer overflow into a real, and
-  its casts are lenient (`'x'` to `int` is 0), as SQLite's are. Proposed: smaltdf's overflow and failed casts are
-  errors, which needs strict operations in the engine (`add_checked` …, `cast_*_strict`). The alternative is the
-  lenient meanings.
+All five as proposed:
+
+- **A. Order.** `filter`, `select`, `withColumns`, `sort` (stable), `head` / `tail` keep order. `groupBy` and `join`
+  give rows in no particular order unless asked (`maintainOrder: true`), because keeping it costs (ADR 0016 §4).
+- **B. Aggregates of no values.** `sum` of no values is 0; `count` is 0; `mean`, `min` and `max` are null. smaltdf's
+  plan gives `sum` as `coalesce(sum, 0)` with the zero of the input's type: no engine operation is needed.
+- **C. Booleans before the `bool` type.** smaltdf types comparisons and logic as `bool` and gives `true` / `false` in
+  `collect`, so its results don't change when the engine's `bool` arrives.
+- **D. Polars in tests.** A separate CI job with Python and `polars` pinned, not part of `npm run check`, writing the
+  differences into the reference. Nothing of Polars is a dependency of the package.
+- **E. Strict arithmetic and conversion.** An integer overflow and a value that doesn't convert are errors, with the
+  engine's checked and strict operations (`add_checked`, `sub_checked`, `mul_checked`, `cast_integer_strict`,
+  `cast_real_strict`).
 
 ## Engine work this needs
 
@@ -78,11 +74,11 @@ Checked against smaltdb `main` (`fabbd86`) by running each operation as a plan:
 
 | For | Engine today | Needed |
 |---|---|---|
-| Decision B (`sum` of no values is 0) | `sum` of no rows is NULL | an operation, or the plan's own `coalesce` |
-| Decision E (strict) | overflow gives a real; `cast_integer('x')` is 0 | checked arithmetic and strict casts |
+| Decision B (`sum` of no values is 0) | `sum` of no rows is NULL | none: the plan's own `coalesce` |
+| Decision E (strict) | overflow gives a real; `cast_integer('x')` is 0 | checked arithmetic and strict casts (stenhoor/smaltdb, `claude/strict-operations`) |
 | NaN | `div_float(0, 0)` is NULL | ADR 0016 step 11 (NaN as a value) |
 | `bool` | comparisons give `int` 0 / 1 | ADR 0016 step 11 |
-| Robustness | a `call` of a cast function (`cast_integer`) crashes the engine with a `TypeError` instead of being rejected | a validator fix |
+| Robustness | a `call` of a cast function (`cast_integer`) crashes the engine with a `TypeError` | a compiler fix (the same smaltdb PR) |
 
 Verified as the reference says: `div_float(7, 2)` is 3.5, `div_floor(-7, 2)` is -4, `mod_floor(-7, 2)` is 1,
 `round_half_even(2.5, 0)` is 2, `lower_unicode('ÄB')` is `'äb'`, `regex_match` gives 1 / 0, `cmp_is(null, null)` is 1.

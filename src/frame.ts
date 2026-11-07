@@ -3,9 +3,9 @@
  * `plan(db)` gives the plan statement it runs as, and `collect(db)` runs it.
  */
 import * as p from 'smaltdb/plan';
-import type { AggCall, CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey } from 'smaltdb/plan';
+import type { AggCall, CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey, ValueColumn } from 'smaltdb/plan';
 import { DfError, fromEngine } from './errors.js';
-import { Expr, type Resolved, type ResolvedWindow, type Scope, hasAggregate, readsColumns, resolve, resolveAggregate, resolveWindow } from './expr.js';
+import { type AggNode, Expr, type Resolved, type ResolvedWindow, type Scope, col, hasAggregate, len, readsColumns, resolve, resolveAggregate, resolveWindow } from './expr.js';
 import { type DfColumn, type DfType, planType } from './types.js';
 
 /** What a frame's statement is built and run with: an engine `Database` (in process) or a client `Database`. */
@@ -41,7 +41,48 @@ type Step =
   | { readonly kind: 'groupBy'; readonly keys: readonly (Expr | string)[]; readonly exprs: readonly (Expr | string)[]; readonly maintainOrder: boolean }
   | { readonly kind: 'unique'; readonly subset: readonly string[] | undefined; readonly keep: 'first' | 'last'; readonly maintainOrder: boolean }
   | { readonly kind: 'join'; readonly other: Frame; readonly options: JoinOptions }
-  | { readonly kind: 'joinAsof'; readonly other: Frame; readonly options: AsofOptions };
+  | { readonly kind: 'joinAsof'; readonly other: Frame; readonly options: AsofOptions }
+  | { readonly kind: 'unpivot'; readonly options: UnpivotOptions }
+  | { readonly kind: 'pivot'; readonly on: string; readonly options: PivotOptions }
+  | { readonly kind: 'sample'; readonly options: SampleOptions };
+
+export interface UnpivotOptions {
+  /** Columns kept on every row. Default: none (with `on`), or the columns `on` doesn't name. */
+  readonly index?: string | readonly string[];
+  /** Columns that become rows. Default: every column `index` doesn't name. */
+  readonly on?: string | readonly string[];
+  /** Default `variable`. */
+  readonly variableName?: string;
+  /** Default `value`. */
+  readonly valueName?: string;
+}
+
+export interface PivotOptions {
+  /** The columns that identify a row of the result. */
+  readonly index: string | readonly string[];
+  /** The column whose values fill the cells. */
+  readonly values: string;
+  /** How a cell's values combine. Default `first`. */
+  readonly aggregate?: 'first' | 'last' | 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'median';
+  /** The values of `on` that become columns, in order. Default: every value `on` has, sorted, read first. */
+  readonly columns?: readonly (number | bigint | string | null)[];
+  /** Rows in order of each index value's first row. Default false. */
+  readonly maintainOrder?: boolean;
+}
+
+export interface SampleOptions {
+  /** A number of rows, or */
+  readonly n?: number;
+  /** a fraction of them. */
+  readonly fraction?: number;
+  /** Draw each row from all rows (rows in the order drawn). Default false: distinct rows, in their order. */
+  readonly withReplacement?: boolean;
+  /** The same seed draws the same rows. Default: a new one each time. */
+  readonly seed?: number;
+}
+
+/** Columns given as JavaScript data (`frame`): typed arrays or arrays of values. */
+export type FrameData = Readonly<Record<string, ArrayLike<unknown> & Iterable<unknown>>>;
 
 export type JoinHow = 'inner' | 'left' | 'right' | 'full' | 'semi' | 'anti' | 'cross';
 
@@ -74,7 +115,10 @@ export interface AsofOptions {
 }
 
 /** A frame's starting rows: a table, or frames one after another. */
-type Root = { readonly kind: 'table'; readonly name: string } | { readonly kind: 'concat'; readonly frames: readonly Frame[] };
+type Root =
+  | { readonly kind: 'table'; readonly name: string }
+  | { readonly kind: 'concat'; readonly frames: readonly Frame[] }
+  | { readonly kind: 'values'; readonly columns: readonly { readonly name: string; readonly data: ValueColumn; readonly type: DfType }[]; readonly length: number };
 
 /** A built frame: its plan and columns. */
 interface Built {
@@ -107,7 +151,7 @@ export class GroupBy {
 
   /** One row per distinct key: the keys first, then one column per expression. */
   agg(...exprs: (Expr | string)[]): Frame {
-    return this.frame.then({ kind: 'groupBy', keys: this.keys, exprs, maintainOrder: this.options.maintainOrder ?? false });
+    return this.frame.withStep({ kind: 'groupBy', keys: this.keys, exprs, maintainOrder: this.options.maintainOrder ?? false });
   }
 }
 
@@ -123,57 +167,97 @@ export class Frame {
 
   /** What error messages call the frame's rows. */
   private get source(): string {
-    return this.root.kind === 'table' ? this.root.name : 'concat(…)';
+    return this.root.kind === 'table' ? this.root.name : this.root.kind === 'concat' ? 'concat(…)' : 'frame(…)';
   }
 
-  /** @internal */
-  then(step: Step): Frame {
+  /** Rows turned into columns: one per value of `on`, the cells from `values` (REFERENCE.md "Reshaping"). */
+  pivot(on: string, options: PivotOptions): Frame {
+    return this.withStep({ kind: 'pivot', on, options });
+  }
+
+  /** Columns turned into rows: one per column of `on` for each row, with its name and value. */
+  unpivot(options: UnpivotOptions = {}): Frame {
+    return this.withStep({ kind: 'unpivot', options });
+  }
+
+  /** Rows drawn at random: `n` of them, or a `fraction`. */
+  sample(options: SampleOptions): Frame {
+    const { n, fraction } = options;
+    if ((n === undefined) === (fraction === undefined)) throw new DfError('SMALTDF_RANGE', 'sample: give n or fraction');
+    if (n !== undefined) count('sample', n);
+    if (fraction !== undefined && !(fraction >= 0 && (options.withReplacement || fraction <= 1))) throw new DfError('SMALTDF_RANGE', `sample: a fraction is between 0 and 1 without replacement, not ${fraction}`);
+    if (options.seed !== undefined && !Number.isSafeInteger(options.seed)) throw new DfError('SMALTDF_RANGE', `sample: a seed is a whole number, not ${options.seed}`);
+    return this.withStep({ kind: 'sample', options: { ...options, seed: options.seed ?? Math.floor(Math.random() * 2 ** 31) } });
+  }
+
+  /** @internal The frame with every pivot's columns known: those not given are read from `db` first. */
+  async resolved(db: Db, tables: Tables): Promise<Frame> {
+    const root: Root = this.root.kind === 'concat' ? { kind: 'concat', frames: await Promise.all(this.root.frames.map((f) => f.resolved(db, tables))) } : this.root;
+    const steps: Step[] = [];
+    for (const step of this.steps) {
+      if (step.kind === 'join' || step.kind === 'joinAsof') steps.push({ ...step, other: await step.other.resolved(db, tables) } as Step);
+      else if (step.kind === 'pivot' && step.options.columns === undefined) {
+        const values = new Frame(root, steps).select(step.on).unique().sort(step.on);
+        let r: { columns: string[]; rows: unknown[][] };
+        try {
+          r = await run(db, values.build(tables).statement);
+        } catch (err) {
+          throw fromEngine(err);
+        }
+        steps.push({ ...step, options: { ...step.options, columns: r.rows.map((x) => x[0] as number | bigint | string | null) } });
+      } else steps.push(step);
+    }
+    return new Frame(root, steps);
+  }
+
+  /** @internal (Not `then`: a frame must not look like a promise to `await`.) */
+  withStep(step: Step): Frame {
     return new Frame(this.root, [...this.steps, step]);
   }
 
   /** Rows of this frame matched with `other`'s by keys (REFERENCE.md "Joins"). */
   join(other: Frame, options: JoinOptions = {}): Frame {
-    return this.then({ kind: 'join', other, options });
+    return this.withStep({ kind: 'join', other, options });
   }
 
   /** Each row of this frame with the row of `other` whose key is nearest its own (by `strategy`). Keeps this frame's order. */
   joinAsof(other: Frame, options: AsofOptions): Frame {
-    return this.then({ kind: 'joinAsof', other, options });
+    return this.withStep({ kind: 'joinAsof', other, options });
   }
 
   /** One column per expression, in that order. A string is `col(name)`. */
   select(...exprs: (Expr | string)[]): Frame {
-    return this.then({ kind: 'select', exprs });
+    return this.withStep({ kind: 'select', exprs });
   }
 
   /** The frame's columns, with these added at the end or replacing a column of the same name in place. */
   withColumns(...exprs: (Expr | string)[]): Frame {
-    return this.then({ kind: 'withColumns', exprs });
+    return this.withStep({ kind: 'withColumns', exprs });
   }
 
   /** The rows where every predicate is true (not false, not null). Keeps order. */
   filter(...preds: Expr[]): Frame {
-    return this.then({ kind: 'filter', preds });
+    return this.withStep({ kind: 'filter', preds });
   }
 
   /** Rows ordered by one or more expressions. Stable: equal rows keep their order. */
   sort(by: Expr | string | readonly (Expr | string)[], options: SortOptions = {}): Frame {
-    return this.then({ kind: 'sort', by: Array.isArray(by) ? by : [by as Expr | string], options });
+    return this.withStep({ kind: 'sort', by: Array.isArray(by) ? by : [by as Expr | string], options });
   }
 
   /** The first `n` rows. */
   head(n = 5): Frame {
-    return this.then({ kind: 'head', n: count('head', n) });
+    return this.withStep({ kind: 'head', n: count('head', n) });
   }
 
   /** The last `n` rows. */
   tail(n = 5): Frame {
-    return this.then({ kind: 'tail', n: count('tail', n) });
+    return this.withStep({ kind: 'tail', n: count('tail', n) });
   }
 
   /** `n` rows (all the rest when omitted) from `offset`. */
   slice(offset: number, n?: number): Frame {
-    return this.then({ kind: 'slice', offset: count('slice', offset), n: n === undefined ? undefined : count('slice', n) });
+    return this.withStep({ kind: 'slice', offset: count('slice', offset), n: n === undefined ? undefined : count('slice', n) });
   }
 
   /** Groups by `keys` (names or expressions); a last argument may give options. Then `.agg(…)`. */
@@ -186,17 +270,19 @@ export class Frame {
   /** One row per distinct value of `subset` (all columns by default). */
   unique(options: UniqueOptions = {}): Frame {
     const subset = options.subset === undefined ? undefined : typeof options.subset === 'string' ? [options.subset] : [...options.subset];
-    return this.then({ kind: 'unique', subset, keep: options.keep ?? 'first', maintainOrder: options.maintainOrder ?? false });
+    return this.withStep({ kind: 'unique', subset, keep: options.keep ?? 'first', maintainOrder: options.maintainOrder ?? false });
   }
 
   /** The plan statement the frame runs as, built against `db`'s catalog. */
   async plan(db: Db): Promise<PlanStatementInput> {
-    return this.build(await tablesOf(db)).statement;
+    const tables = await tablesOf(db);
+    return (await this.resolved(db, tables)).build(tables).statement;
   }
 
   /** Runs the frame on `db`. */
   async collect(db: Db): Promise<DfResult> {
-    const { statement, columns } = this.build(await tablesOf(db));
+    const tables = await tablesOf(db);
+    const { statement, columns } = (await this.resolved(db, tables)).build(tables);
     let raw: { columns: string[]; rows: unknown[][] };
     try {
       raw = await run(db, statement);
@@ -307,6 +393,17 @@ export class Frame {
         case 'joinAsof':
           ({ op, columns } = asofStep({ op, columns }, this.source, step.other.buildOp(tables), step.other.source, step.options));
           break;
+        case 'unpivot':
+          ({ op, columns } = unpivotStep({ op, columns }, this.source, step.options));
+          break;
+        case 'pivot':
+          ({ op, columns } = pivotStep({ op, columns }, scope, step.on, step.options));
+          break;
+        case 'sample': {
+          const o = step.options;
+          op = p.sample(op, o.n !== undefined ? { count: o.n } : { fraction: o.fraction! }, { replace: o.withReplacement ?? false, seed: o.seed! });
+          break;
+        }
       }
     }
     return { op, columns };
@@ -314,6 +411,10 @@ export class Frame {
 
   private buildRoot(tables: Tables): Built {
     if (this.root.kind === 'concat') return concatOf(this.root.frames.map((f) => f.buildOp(tables)));
+    if (this.root.kind === 'values') {
+      const cs = this.root.columns;
+      return { op: p.fromColumns(cs.map((c) => c.data), cs.map((c) => planType(c.type))), columns: cs.map((c) => ({ name: c.name, type: c.type })) };
+    }
     const t = tables(this.root.name);
     if (!t) throw new DfError('SMALTDF_SCHEMA', `table: no table or view "${this.root.name}"`);
     return { op: p.scan(t.name, t.columns.map((_, i) => i), t.schema === 'temp' ? { db: 'temp' } : {}), columns: t.columns.map((c) => ({ name: c.name, type: c.type })) };
@@ -354,6 +455,81 @@ function withWindows(input: PlanOp, scope: Scope, resolveAll: (sc: Scope) => Res
   let next = 0;
   const results = resolveAll({ ...scope, win: () => { const i = next++; const w = found[i]!; return { plan: w.read(p.col(0, index[i]!, planType(w.type))), type: w.type, name: w.name }; } });
   return { op, results, added: true };
+}
+
+/** Rows from JavaScript data: one column per key, typed arrays or arrays of values, all of one length. */
+export function frame(data: FrameData): Frame {
+  const entries = Object.entries(data);
+  if (entries.length === 0) throw new DfError('SMALTDF_SCHEMA', 'frame: no columns');
+  const columns = entries.map(([name, values]) => ({ name, ...columnOf(name, values) }));
+  const length = columns[0]!.length;
+  for (const c of columns) if (c.length !== length) throw new DfError('SMALTDF_SCHEMA', `frame: column ${c.name} has ${c.length} values, not ${length}`);
+  return new Frame({ kind: 'values', columns: columns.map(({ name, data, type }) => ({ name, data, type })), length }, []);
+}
+
+const INT_ARRAYS = [Int8Array, Int16Array, Int32Array, Uint8Array, Uint16Array, Uint32Array, BigInt64Array];
+
+/** A column's data as the engine reads it, and its smaltdf type. */
+function columnOf(name: string, values: ArrayLike<unknown> & Iterable<unknown>): { data: ValueColumn; type: DfType; length: number } {
+  if (values instanceof Float64Array || values instanceof Float32Array) return { data: values, type: 'real', length: values.length };
+  if (INT_ARRAYS.some((k) => values instanceof k)) return { data: values as ValueColumn, type: 'int', length: values.length };
+  const arr = Array.from(values);
+  const kinds = new Set<string>(arr.filter((v) => v !== null && v !== undefined).map((v) => (v instanceof Uint8Array ? 'blob' : typeof v)));
+  const kind = (k: string): boolean => kinds.has(k);
+  if ([...kinds].some((k) => !['number', 'bigint', 'string', 'boolean', 'blob'].includes(k))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} holds values of a kind smaltdf has no type for (${[...kinds].join(', ')})`);
+  if (kinds.size > 1 && !(kinds.size === 2 && kind('number') && kind('bigint'))) throw new DfError('SMALTDF_TYPE', `frame: column ${name} mixes ${[...kinds].join(' and ')}`);
+  // An integer in the safe range is a number, as the engine gives integers back; a bigint only beyond it.
+  const clean = arr.map((v) => (v === undefined ? null : typeof v === 'bigint' && v >= -9007199254740991n && v <= 9007199254740991n ? Number(v) : v));
+  if (kind('boolean')) return { data: clean.map((v) => (v === null ? null : v ? 1 : 0)), type: 'bool', length: arr.length };
+  if (kind('string')) return { data: clean as string[], type: 'text', length: arr.length };
+  if (kind('blob')) return { data: clean as Uint8Array[], type: 'blob', length: arr.length };
+  if (kind('number') || kind('bigint')) {
+    const ints = clean.every((v) => v === null || typeof v === 'bigint' || Number.isInteger(v));
+    return { data: clean as (number | bigint | null)[], type: ints ? 'int' : 'real', length: arr.length };
+  }
+  return { data: clean as null[], type: 'null', length: arr.length };
+}
+
+const pick = (step: string, source: string, columns: readonly DfColumn[], names: readonly string[]): number[] =>
+  names.map((n) => {
+    const i = columns.findIndex((c) => c.name === n);
+    if (i < 0) throw new DfError('SMALTDF_SCHEMA', `${step}: no column "${n}" in ${source} (columns: ${columns.map((c) => c.name).join(', ')})`);
+    return i;
+  });
+
+function unpivotStep(input: Built, source: string, o: UnpivotOptions): Built {
+  const names = input.columns.map((c) => c.name);
+  const index = list(o.index) ?? (o.on !== undefined ? [] : undefined);
+  const on = list(o.on) ?? names.filter((n) => !(index ?? []).includes(n));
+  const keep = pick('unpivot', source, input.columns, index ?? names.filter((n) => !on.includes(n)));
+  const cols = pick('unpivot', source, input.columns, on);
+  const types = [...new Set(cols.map((i) => input.columns[i]!.type))];
+  const type: DfType = types.length === 1 ? types[0]! : 'any';
+  const variable = o.variableName ?? 'variable';
+  const value = o.valueName ?? 'value';
+  const out = [...keep.map((i) => input.columns[i]!), { name: variable, type: 'text' as DfType }, { name: value, type }];
+  if (new Set(out.map((c) => c.name)).size !== out.length) throw new DfError('SMALTDF_SCHEMA', `unpivot: two columns named the same (choose variableName / valueName)`);
+  return { op: p.unpivot(input.op, keep, cols, on, planType(type)), columns: out };
+}
+
+function pivotStep(input: Built, scope: Scope, on: string, o: PivotOptions): Built {
+  const sc: Scope = { ...scope, step: 'pivot' };
+  const keys = (list(o.index) ?? []).map((k) => resolve(k, sc));
+  if (keys.length === 0) throw new DfError('SMALTDF_TYPE', 'pivot: give index, the columns that identify a row');
+  const onR = resolve(on, sc);
+  const fn = o.aggregate ?? 'first';
+  const valueExpr = fn === 'len' ? len() : col(o.values)[fn]();
+  const agg = resolveAggregate(valueExpr.node as AggNode, sc);
+  const values = o.columns ?? [];
+  const op0 = p.pivot(input.op, keys.map((k) => k.plan), onR.plan, values as Parameters<typeof p.pivot>[3], [agg.call], o.maintainOrder ? { ordered: 'first' } : {});
+  // sum of no values is 0 (decision B): a cell with no rows is 0 for sum.
+  const cells = values.map((v, i) => {
+    const ref = p.col(0, keys.length + i, planType(agg.type));
+    return fn === 'sum' ? p.call('coalesce', [ref, p.lit(0, agg.type === 'real' ? 'real' : 'int')], planType(agg.type)) : ref;
+  });
+  const columns = [...keys.map((k) => ({ name: k.name, type: k.type })), ...values.map((v) => ({ name: v === null ? 'null' : String(v), type: agg.type }))];
+  if (new Set(columns.map((c) => c.name)).size !== columns.length) throw new DfError('SMALTDF_SCHEMA', `pivot: a value of ${on} names a column the index has (${columns.map((c) => c.name).join(', ')})`);
+  return { op: p.project(op0, [...keys.map((k, i) => p.col(0, i, planType(k.type))), ...cells]), columns };
 }
 
 /** The frames' rows one after another: the first frame's, in its order, then the next's. Columns must match. */

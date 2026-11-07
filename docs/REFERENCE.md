@@ -165,7 +165,46 @@ outside `agg` and a select of aggregates.
 Cost: windows with the same partition, order and frame are computed together. When a window has an order, the rows
 are numbered first and put back in place after, so a frame keeps its order.
 
+## Reshaping
+
+```ts
+table('scores').pivot('subject', { index: 'name', values: 'score', aggregate: 'sum' });
+table('wide').unpivot({ index: 'id' });
+table('orders').sample({ n: 100, seed: 1 });
+```
+
+`pivot(on, { index, values, aggregate?, columns?, maintainOrder? })` gives one row per distinct `index` value (one
+column name or several), then one column per value of `on`, named by it (`null` for a null value). Each cell is
+`aggregate` (`first` by default; also `last`, `sum`, `mean`, `min`, `max`, `count`, `len`, `median`) of the `values`
+of the rows with that index and that value of `on`; a cell with no rows is null, or 0 for `sum` and `count`.
+`columns` gives the values of `on` that become columns, in order. Without it, the values are read from the frame (as
+it is at the pivot) before it runs, sorted. Rows come in no particular order unless `maintainOrder: true`.
+
+`unpivot({ index?, on?, variableName?, valueName? })` gives, for each row, one row per column of `on`: the `index`
+columns, the column's name (`variable` by default), then its value (`value`), in the frame's order and then the
+columns' order. `on` defaults to the columns `index` doesn't name, and `index` to those `on` doesn't. A null value
+gives a row too.
+
+`sample({ n | fraction, withReplacement?, seed? })` draws rows at random: `n` of them (all, when there are fewer), or
+that `fraction`. Without replacement the rows are distinct and keep their order; with it, each draw is any row, in the
+order drawn. The same `seed` draws the same rows; without one, each run draws anew.
+
+## Data from JavaScript
+
+```ts
+import { frame } from '@smaltdb/df';
+
+frame({ id: new Int32Array([1, 2, 3]), name: ['a', 'b', null], score: [1.5, 2, null] }).filter(col('score').gt(1));
+```
+
+`frame(columns)` gives rows from JavaScript data: one column per key, all of one length. A column is a typed array
+(`Int8Array` … `Uint32Array` and `BigInt64Array` are `int`; `Float32Array` and `Float64Array` are `real`, where NaN
+reads as null) or an array of values of one kind: numbers (`int` when all are integers, else `real`), bigints
+(`int`), strings (`text`), booleans (`bool`) or `Uint8Array`s (`blob`); `null` and `undefined` are null. An integer in
+the safe range comes back as a number. A frame of data joins tables and takes every method. Through the client, typed
+arrays cross to the worker as binary data.
+
 ## Not yet in the language
 
-Reshaping, data from JavaScript, writes and views follow the order of work in [DESIGN.md](DESIGN.md). Dates and
-times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
+Writes and views follow the order of work in [DESIGN.md](DESIGN.md). Dates and times, lists and structs follow the
+engine's types (smaltdb ADR 0016 step 11).

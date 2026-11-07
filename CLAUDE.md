@@ -17,7 +17,8 @@ the two share, to show users where they differ.
 
 ## Status
 
-Design stage. smaltdf waits for the plan layer (smaltdb ADR 0014, all nine steps, before any npm publish). An earlier
+Design stage, ready to build: the plan layer (smaltdb ADR 0014, 0015 step 8, 0016 steps 1–10) is in smaltdb. The order of work
+is in [docs/DESIGN.md](docs/DESIGN.md), the language in [docs/REFERENCE.md](docs/REFERENCE.md). An earlier
 version that compiled to SQL was merged and then removed; don't restore any of it.
 
 ## Commands

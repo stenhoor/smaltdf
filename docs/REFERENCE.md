@@ -1,0 +1,84 @@
+# smaltdf reference (v0)
+
+Draft: the part of the language that steps 2–5 of [DESIGN.md](DESIGN.md) implement. Where a decision for the owner
+is open, the proposed meaning is written and marked *(proposed)*.
+
+## Frames
+
+A frame describes rows with named, typed columns. Building a frame runs nothing.
+
+```ts
+import { col, lit, table } from '@smaltdb/df';
+
+const big = table('orders')
+  .filter(col('qty').gt(10))
+  .withColumns(col('qty').mul(col('price')).alias('total'))
+  .sort('total', { descending: true })
+  .head(5);
+
+const result = await big.collect(db); // db: a smaltdb Database, in process or through the worker
+```
+
+| Method | Meaning |
+|---|---|
+| `table(name, { schema? })` | The rows of a table or view, in storage order (rowid order for row tables). |
+| `select(...exprs)` | One column per expression, in that order. A string is `col(name)`. |
+| `withColumns(...exprs)` | The frame's columns, with these added at the end or replacing a column of the same name in place. |
+| `filter(...predicates)` | The rows where every predicate is true (not false, not null). Keeps order. |
+| `sort(by, { descending?, nullsLast? })` | Rows ordered by one or more expressions. Stable: equal rows keep their order. Nulls first by default *(proposed: Polars puts them first; check before step 2)*. |
+| `head(n)`, `tail(n)`, `slice(offset, n?)` | The first `n` rows, the last `n`, or `n` from `offset`. |
+| `collect(db)` | Runs the frame. Resolves to `{ columns, types, rows }` and a `toObjects()` helper. |
+| `plan()` | The plan statement (`PlanStatementInput`) the frame runs as. |
+
+A column name that doesn't exist, or an expression of the wrong type for its method, is an error when the frame is
+built. The error names the method (`filter: no column "qtty" in orders (columns: id, qty, price)`).
+
+## Expressions
+
+| Expression | Meaning | Engine operation |
+|---|---|---|
+| `col(name)` | A column of the frame. | column reference |
+| `lit(value)` | A constant: number, bigint, string, `Uint8Array`, boolean, `null`. | literal |
+| `a.add(b)`, `.sub`, `.mul` | Arithmetic; int with int stays int, any real makes real. Integer overflow is an error *(proposed, decision E: the engine's `add` gives a real instead)*. | `add`, `sub`, `mul` |
+| `a.div(b)` | True division: always real. `7 / 2` is `3.5`. Division by zero gives null *(NaN once the engine keeps NaN)*. | `div_float` |
+| `a.floorDiv(b)` | Division rounded toward negative infinity: `-7 // 2` is `-4`. | `div_floor` |
+| `a.mod(b)` | Remainder with the sign of the divisor: `-7 % 2` is `1`. | `mod_floor` |
+| `a.eq(b)`, `.ne`, `.lt`, `.le`, `.gt`, `.ge` | Comparison. With a null operand the result is null. | `cmp_eq` … |
+| `a.eqMissing(b)` | Equality where null equals null. | `cmp_is` |
+| `a.and(b)`, `.or(b)`, `.not()` | Logic with nulls (null and false is false; null or true is true). | `and`, `or`, `not` |
+| `a.isNull()`, `.isNotNull()` | Null tests; never null. | null test |
+| `a.cast(type)` | Conversion to `int`, `real`, `text`, `blob`. A value that doesn't convert is an error *(proposed, decision E: the engine's casts are lenient, `'x'` to `int` is 0)*. | `cast_*` |
+| `a.alias(name)` | The same expression under another name. | — |
+| `a.round(digits)` | Rounding half to even. | `round_half_even` |
+| `a.str.lower()`, `.upper()` | Unicode case mapping. | `lower_unicode`, `upper_unicode` |
+| `a.str.contains(pattern)` | Whether a regular expression matches anywhere in the text. | `regex_match` |
+
+Comparisons and logic have type `bool` in smaltdf; `collect` gives `true` / `false` *(proposed, decision C)*.
+
+## Aggregation
+
+```ts
+table('orders').groupBy('region').agg(col('qty').sum().alias('qty'), col('price').mean());
+```
+
+`groupBy(...keys, { maintainOrder? })` gives one row per distinct key, with the keys first, then each aggregate.
+Groups come in no particular order unless `maintainOrder: true`, which gives them in order of each group's first row
+*(proposed, decision A)*.
+
+| Aggregate | Meaning | Engine operation |
+|---|---|---|
+| `sum()` | Sum of the non-null values; 0 when there are none *(proposed, decision B)*. | `sum` |
+| `mean()` | Mean of the non-null values; null when there are none. | `avg` |
+| `min()`, `max()` | Smallest, largest; null when there are none. | `min`, `max` |
+| `count()` | Number of non-null values. | `count` |
+| `len()` | Number of rows. | `count(*)` |
+| `first()`, `last()` | The first, last value in the group's order. | `first`, `last` |
+| `median()`, `std()`, `var()` | As named; `std` and `var` are the sample forms. | `median`, `stddev_samp`, `var_samp` |
+
+`unique({ subset?, keep? })` keeps one row per distinct value of `subset` (all columns by default): the first
+(`keep: 'first'`, the default) or last.
+
+## Not yet in the language
+
+Joins, windows, reshaping, data from JavaScript, writes and views follow the order of work in
+[DESIGN.md](DESIGN.md). Dates and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).

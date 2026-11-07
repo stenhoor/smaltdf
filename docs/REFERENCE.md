@@ -133,7 +133,39 @@ side's `on` and `by` columns are not repeated.
 `concat(frames)` gives the first frame's rows, in its order, then the next frame's, and so on. The frames have the
 same column names, in the same order, and each column has one type.
 
+## Windows
+
+```ts
+table('sales').withColumns(
+  col('amt').sum().over('shop').alias('shop_total'),
+  col('amt').cumSum().over('shop', { orderBy: 't' }).alias('running'),
+  col('amt').rank({ descending: true }).over('shop').alias('rank_in_shop'),
+);
+table('sales').filter(col('amt').rank({ method: 'ordinal', descending: true }).over('shop').eq(1)); // top per shop
+```
+
+A window computes a value for every row from the rows around it, and never moves rows: the result has the frame's
+rows in the frame's order. Windows are used in `select`, `withColumns` and `filter`.
+
+`expr.over(partitionBy?, { orderBy?, descending? })` computes `expr`, one aggregate or window function, per partition
+(the rows with equal `partitionBy` values; none: all rows). `orderBy` orders each partition for the functions that
+follow an order. Without it they follow the frame's order.
+
+| Function | Meaning | Engine operation |
+|---|---|---|
+| an aggregate, `.over(…)` | The aggregate of the row's partition (as in `agg`: `sum` of no values is 0). `first` / `last` follow `orderBy`. | the aggregate over the whole partition |
+| `cumSum()`, `cumMin()`, `cumMax()` | Running sum, minimum, maximum of the non-null values so far; null where the value is null. | `sum`, `min`, `max` over the rows so far |
+| `cumCount()` | The number of non-null values so far. | `count` over the rows so far |
+| `shift(n = 1, fill = null)` | The value `n` rows earlier (`n` rows later for a negative `n`), or `fill` where there is none. | `lag`, `lead` |
+| `rank({ method?, descending? })` | The value's rank: `min` (default; ties share the lowest rank), `dense` (ranks without gaps), `ordinal` (ties by order). Null values rank null. Orders by its own value, so `over` takes no `orderBy`. | `rank`, `dense_rank`, `row_number` |
+
+A window function without `over` works on all rows, in the frame's order. An aggregate without `over` is an error
+outside `agg` and a select of aggregates.
+
+Cost: windows with the same partition, order and frame are computed together. When a window has an order, the rows
+are numbered first and put back in place after, so a frame keeps its order.
+
 ## Not yet in the language
 
-Windows, reshaping, data from JavaScript, writes and views follow the order of work in [DESIGN.md](DESIGN.md). Dates
-and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
+Reshaping, data from JavaScript, writes and views follow the order of work in [DESIGN.md](DESIGN.md). Dates and
+times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).

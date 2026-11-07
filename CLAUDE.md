@@ -17,7 +17,7 @@ the two share, to show users where they differ.
 
 ## Status
 
-In development, not published: core frames, aggregation and joins (steps 2–4 of [docs/DESIGN.md](docs/DESIGN.md)) are in; the order of work is in
+In development, not published: core frames, aggregation, joins and windows (steps 2–5 of [docs/DESIGN.md](docs/DESIGN.md)) are in; the order of work is in
 DESIGN.md, the language in [docs/REFERENCE.md](docs/REFERENCE.md). Tests run with no language registered (`test/boundary.test.ts`
 keeps `src/` on `smaltdb/plan`). An earlier
 version that compiled to SQL was merged and then removed; don't restore any of it.

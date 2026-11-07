@@ -5,7 +5,7 @@
 import * as p from 'smaltdb/plan';
 import type { AggCall, CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey } from 'smaltdb/plan';
 import { DfError, fromEngine } from './errors.js';
-import { Expr, type Resolved, type Scope, hasAggregate, readsColumns, resolve, resolveAggregate } from './expr.js';
+import { Expr, type Resolved, type ResolvedWindow, type Scope, hasAggregate, readsColumns, resolve, resolveAggregate, resolveWindow } from './expr.js';
 import { type DfColumn, type DfType, planType } from './types.js';
 
 /** What a frame's statement is built and run with: an engine `Database` (in process) or a client `Database`. */
@@ -234,14 +234,15 @@ export class Frame {
             ({ op, columns } = aggregateStep(op, scope, [], step.exprs, false));
             break;
           }
-          const rs = step.exprs.map((e) => resolve(e, scope));
-          unique(step.kind, rs);
-          op = p.project(op, rs.map((r) => r.plan));
-          columns = rs.map((r) => ({ name: r.name, type: r.type }));
+          const w = withWindows(op, scope, (sc) => step.exprs.map((e) => resolve(e, sc)));
+          unique(step.kind, w.results);
+          op = p.project(w.op, w.results.map((r) => r.plan));
+          columns = w.results.map((r) => ({ name: r.name, type: r.type }));
           break;
         }
         case 'withColumns': {
-          const rs = step.exprs.map((e) => resolve(e, scope));
+          const w = withWindows(op, scope, (sc) => step.exprs.map((e) => resolve(e, sc)));
+          const rs = w.results;
           unique(step.kind, rs);
           const exprs: PlanExpr[] = columns.map((c, i) => p.col(0, i, planType(c.type)));
           const next = [...columns];
@@ -255,15 +256,18 @@ export class Frame {
               next.push({ name: r.name, type: r.type });
             }
           }
-          op = p.project(op, exprs);
+          op = p.project(w.op, exprs);
           columns = next;
           break;
         }
         case 'filter': {
           if (step.preds.length === 0) break;
-          const rs = step.preds.map((e) => resolve(e, scope));
+          const w = withWindows(op, scope, (sc) => step.preds.map((e) => resolve(e, sc)));
+          const rs = w.results;
           for (const r of rs) if (r.type !== 'bool' && r.type !== 'null' && r.type !== 'any') throw new DfError('SMALTDF_TYPE', `filter: a predicate is bool, not ${r.type} (${r.name})`);
-          op = p.filter(op, rs.length === 1 ? rs[0]!.plan : p.and(...rs.map((r) => r.plan)));
+          op = p.filter(w.op, rs.length === 1 ? rs[0]!.plan : p.and(...rs.map((r) => r.plan)));
+          // The windows' columns were only for the predicates.
+          if (w.added) op = p.project(op, columns.map((c, i) => p.col(0, i, planType(c.type))));
           break;
         }
         case 'sort': {
@@ -314,6 +318,42 @@ export class Frame {
     if (!t) throw new DfError('SMALTDF_SCHEMA', `table: no table or view "${this.root.name}"`);
     return { op: p.scan(t.name, t.columns.map((_, i) => i), t.schema === 'temp' ? { db: 'temp' } : {}), columns: t.columns.map((c) => ({ name: c.name, type: c.type })) };
   }
+}
+
+/**
+ * Expressions resolved with the windows they use computed beneath `input`. Calls of one window (the same partition,
+ * order and frame) share one; each window adds its calls' columns after the input's. A window with an order would let
+ * the engine reorder the rows, so the rows are numbered first (a window without order numbers them in input order)
+ * and sorted back after: rows keep their place, as the reference says.
+ */
+function withWindows(input: PlanOp, scope: Scope, resolveAll: (sc: Scope) => Resolved[]): { op: PlanOp; results: Resolved[]; added: boolean } {
+  const found: ResolvedWindow[] = [];
+  const first = resolveAll({ ...scope, win: (n) => { const w = resolveWindow(n, scope); found.push(w); return { plan: p.lit(null), type: w.type, name: w.name }; } });
+  if (found.length === 0) return { op: input, results: first, added: false };
+  const width = scope.columns.length;
+  const groups = new Map<string, number[]>();
+  found.forEach((w, i) => {
+    const key = JSON.stringify([w.partition, w.order, w.frame]);
+    groups.set(key, [...(groups.get(key) ?? []), i]);
+  });
+  const ordered = found.some((w) => w.order.length > 0);
+  let op = input;
+  let at = width;
+  if (ordered) {
+    op = p.window(op, [p.windowCall('row_number', [], 'int')]);
+    at += 1;
+  }
+  const index: number[] = [];
+  for (const members of groups.values()) {
+    const w0 = found[members[0]!]!;
+    op = p.window(op, members.map((i) => found[i]!.call), { partition: w0.partition, order: w0.order, frame: w0.frame });
+    members.forEach((i, j) => (index[i] = at + j));
+    at += members.length;
+  }
+  if (ordered) op = p.sort(op, [p.asc(p.col(0, width, 'int'))]);
+  let next = 0;
+  const results = resolveAll({ ...scope, win: () => { const i = next++; const w = found[i]!; return { plan: w.read(p.col(0, index[i]!, planType(w.type))), type: w.type, name: w.name }; } });
+  return { op, results, added: true };
 }
 
 /** The frames' rows one after another: the first frame's, in its order, then the next's. Columns must match. */

@@ -3,7 +3,7 @@
  * its plan is built. Each method maps to the engine operation that means what smaltdf's reference says.
  */
 import * as p from 'smaltdb/plan';
-import type { AggCall, PlanExpr } from 'smaltdb/plan';
+import type { AggCall, PlanExpr, SortKey, WindowCall, WindowFrame } from 'smaltdb/plan';
 import { DfError, type DfOrigin } from './errors.js';
 import { type DfColumn, type DfType, isNumeric, planType } from './types.js';
 
@@ -16,7 +16,34 @@ type Node =
   | { readonly k: 'op'; readonly method: string; readonly args: readonly Node[] }
   | { readonly k: 'cast'; readonly to: CastType; readonly arg: Node }
   | { readonly k: 'alias'; readonly name: string; readonly arg: Node }
-  | AggNode;
+  | AggNode
+  | WinNode
+  | OverNode;
+
+/** Window functions (REFERENCE.md "Windows"): over the frame's rows in order, or a partition's. */
+export type WinFn = 'cumSum' | 'cumMin' | 'cumMax' | 'cumCount' | 'shift' | 'rank';
+
+export type RankMethod = 'min' | 'dense' | 'ordinal';
+
+/** @internal */
+export interface WinNode {
+  readonly k: 'win';
+  readonly fn: WinFn;
+  readonly arg: Node;
+  readonly n?: number;
+  readonly fill?: Node;
+  readonly method?: RankMethod;
+  readonly descending?: boolean;
+}
+
+/** @internal An aggregate or window function over partitions, ordered within each by `order`. */
+export interface OverNode {
+  readonly k: 'over';
+  readonly arg: Node;
+  readonly partition: readonly Node[];
+  readonly order: readonly Node[];
+  readonly descending: readonly boolean[];
+}
 
 /** The aggregates (REFERENCE.md "Aggregation"). */
 export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'first' | 'last' | 'median' | 'std' | 'var';
@@ -44,6 +71,8 @@ export interface Scope {
   readonly step: string;
   /** Resolves an aggregate, where the step aggregates (groupBy(…).agg, a select of aggregates); elsewhere none. */
   readonly agg?: (n: AggNode) => Resolved;
+  /** Resolves a window function or an `over`, where the step computes windows (select, withColumns, filter). */
+  readonly win?: (n: WinNode | OverNode) => Resolved;
 }
 
 const node = (x: ExprLike): Node => (x instanceof Expr ? x.node : { k: 'lit', value: x });
@@ -106,6 +135,34 @@ export class Expr {
   std(): Expr { return this.aggregate('std'); }
   /** The sample variance. */
   var(): Expr { return this.aggregate('var'); }
+
+  /** The running sum, in the frame's order (or `over`'s): null where the value is null. */
+  cumSum(): Expr { return this.window({ fn: 'cumSum' }); }
+  cumMin(): Expr { return this.window({ fn: 'cumMin' }); }
+  cumMax(): Expr { return this.window({ fn: 'cumMax' }); }
+  /** The number of non-null values so far. */
+  cumCount(): Expr { return this.window({ fn: 'cumCount' }); }
+  /** The value `n` rows earlier (later for a negative `n`), or `fill` (default null) where there is none. */
+  shift(n = 1, fill: ExprLike = null): Expr {
+    if (!Number.isSafeInteger(n)) throw new DfError('SMALTDF_RANGE', `shift: expected a whole number of rows, not ${n}`);
+    return this.window({ fn: 'shift', n, fill: node(fill) });
+  }
+  /** The value's rank: `min` (default; ties share the lowest), `dense`, or `ordinal` (ties by order). Null stays null. */
+  rank(options: { method?: RankMethod; descending?: boolean } = {}): Expr {
+    return this.window({ fn: 'rank', method: options.method ?? 'min', descending: options.descending ?? false });
+  }
+
+  /** This aggregate or window function per partition, `orderBy` ordering each partition. Rows keep their place. */
+  over(partitionBy: string | Expr | readonly (string | Expr)[] = [], options: { orderBy?: string | Expr | readonly (string | Expr)[]; descending?: boolean | readonly boolean[] } = {}): Expr {
+    const nodes = (x: string | Expr | readonly (string | Expr)[] | undefined): Node[] => (x === undefined ? [] : (Array.isArray(x) ? x : [x]).map((e: string | Expr) => (typeof e === 'string' ? col(e).node : e.node)));
+    const order = nodes(options.orderBy);
+    const d = options.descending;
+    return new Expr({ k: 'over', arg: this.node, partition: nodes(partitionBy), order, descending: order.map((_, i) => (Array.isArray(d) ? (d[i] ?? false) : ((d as boolean | undefined) ?? false))) });
+  }
+
+  private window(w: Omit<WinNode, 'k' | 'arg'>): Expr {
+    return new Expr({ k: 'win', arg: this.node, ...w });
+  }
 
   private aggregate(fn: AggFn): Expr {
     return new Expr({ k: 'agg', fn, arg: this.node });
@@ -207,8 +264,12 @@ function resolveNode(n: Node, scope: Scope): Resolved {
     case 'op':
       return resolveOp(n, scope);
     case 'agg':
-      if (!scope.agg) throw new DfError('SMALTDF_TYPE', `${scope.step}: ${n.fn} is an aggregate: use it in groupBy(…).agg(…), or in a select of aggregates only`);
+      if (!scope.agg) throw new DfError('SMALTDF_TYPE', `${scope.step}: ${n.fn} is an aggregate: use it in groupBy(…).agg(…), in a select of aggregates only, or per row with .over(…)`);
       return scope.agg(n);
+    case 'win':
+    case 'over':
+      if (!scope.win) throw new DfError('SMALTDF_TYPE', `${scope.step}: ${n.k === 'over' ? 'over' : n.fn} is a window: use it in select, withColumns or filter`);
+      return scope.win(n);
   }
 }
 
@@ -343,3 +404,80 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
 
 const isBool = (t: DfType): boolean => t === 'bool' || t === 'null' || t === 'any';
 const isText = (t: DfType): boolean => t === 'text' || t === 'null' || t === 'any';
+
+/** A window call, the window it is computed in, and how its result is read. */
+export interface ResolvedWindow {
+  readonly call: WindowCall;
+  /** Partition, order and frame: calls with the same window share one. */
+  readonly partition: readonly PlanExpr[];
+  readonly order: readonly SortKey[];
+  readonly frame: WindowFrame;
+  readonly type: DfType;
+  readonly name: string;
+  /** The call's result as the expression's value, from its column `ref`. */
+  readonly read: (ref: PlanExpr) => PlanExpr;
+}
+
+const WHOLE = p.frame('ROWS', p.unboundedPreceding, p.unboundedFollowing);
+const RUNNING = p.frame('ROWS', p.unboundedPreceding, p.currentRow);
+const RANKS: Readonly<Record<RankMethod, string>> = { min: 'rank', dense: 'dense_rank', ordinal: 'row_number' };
+
+/** `n` (a window function, or an `over` of one or of an aggregate) resolved against the rows it runs over. */
+export function resolveWindow(n: WinNode | OverNode, input: Scope): ResolvedWindow {
+  const plain: Scope = { ...input, agg: undefined, win: undefined };
+  const over = n.k === 'over' ? n : undefined;
+  const target = over ? over.arg : n;
+  if (target.k !== 'agg' && target.k !== 'win') throw new DfError('SMALTDF_TYPE', `${input.step}: over applies to one aggregate or window function (col('qty').sum().over('region')), not to an expression of them`);
+  const partition = (over?.partition ?? []).map((x) => resolveNode(x, plain).plan);
+  const order = (over?.order ?? []).map((x, i) => {
+    const r = resolveNode(x, plain).plan;
+    return over!.descending[i] ? p.desc(r, { nullsFirst: true }) : p.asc(r, { nullsFirst: true });
+  });
+  const origin: DfOrigin = { step: input.step, method: target.k === 'agg' ? target.fn : target.fn };
+  const call = (fn: string, args: PlanExpr[], type: DfType, options: { star?: boolean } = {}): WindowCall => ({ ...p.windowCall(fn, args, planType(type), options), origin }) as WindowCall;
+  const nullWhereNull = (arg: PlanExpr) => (ref: PlanExpr) => p.caseWhen([{ when: p.isNull(arg), then: p.lit(null) }], 'any', ref);
+
+  if (target.k === 'agg') {
+    // An aggregate per partition: over each partition's rows, ordered only where order matters (first, last).
+    const a = resolveAggregate(target, plain);
+    const ordered = target.fn === 'first' || target.fn === 'last';
+    const sum = target.fn === 'sum';
+    return {
+      call: call(a.call.fn, [...a.call.args], a.type, { star: a.call.star }),
+      partition,
+      order: ordered ? order : [],
+      frame: WHOLE,
+      type: a.type,
+      name: a.name,
+      read: sum ? (ref) => p.call('coalesce', [ref, p.lit(0, a.type === 'real' ? 'real' : 'int')], planType(a.type)) : (ref) => ref,
+    };
+  }
+  const arg = resolveNode(target.arg, plain);
+  const need = (ok: boolean, what: string): void => {
+    if (!ok) throw typeError(input, target.fn, `${what}, not ${arg.type}`);
+  };
+  switch (target.fn) {
+    case 'cumSum':
+    case 'cumMin':
+    case 'cumMax': {
+      if (target.fn === 'cumSum') need(isNumeric(arg.type) || arg.type === 'bool', 'takes numbers');
+      const type: DfType = target.fn === 'cumSum' ? (arg.type === 'real' ? 'real' : arg.type === 'int' || arg.type === 'bool' ? 'int' : 'num') : arg.type;
+      const fn = target.fn === 'cumSum' ? 'sum' : target.fn === 'cumMin' ? 'min' : 'max';
+      return { call: call(fn, [arg.plan], type), partition, order, frame: RUNNING, type, name: arg.name, read: nullWhereNull(arg.plan) };
+    }
+    case 'cumCount':
+      return { call: call('count', [arg.plan], 'int'), partition, order, frame: RUNNING, type: 'int', name: arg.name, read: (ref) => ref };
+    case 'shift': {
+      const k = target.n ?? 1;
+      const fill = resolveNode(target.fill ?? { k: 'lit', value: null }, plain);
+      if (k === 0) return { call: call('first_value', [arg.plan], arg.type), partition, order, frame: p.frame('ROWS', p.currentRow, p.currentRow), type: arg.type, name: arg.name, read: (ref) => ref };
+      return { call: call(k > 0 ? 'lag' : 'lead', [arg.plan, p.lit(Math.abs(k)), fill.plan], arg.type), partition, order, frame: RUNNING, type: arg.type, name: arg.name, read: (ref) => ref };
+    }
+    case 'rank': {
+      if (over && over.order.length) throw new DfError('SMALTDF_TYPE', `${input.step}: rank orders by its own value: give over() no orderBy`);
+      // Nulls last, so they take no rank of the values; their rank is null.
+      const key = target.descending ? p.desc(arg.plan, { nullsFirst: false }) : p.asc(arg.plan, { nullsFirst: false });
+      return { call: call(RANKS[target.method ?? 'min'], [], 'int'), partition, order: [key], frame: RUNNING, type: 'int', name: arg.name, read: nullWhereNull(arg.plan) };
+    }
+  }
+}

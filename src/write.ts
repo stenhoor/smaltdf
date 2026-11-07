@@ -27,15 +27,16 @@ export interface CreateTableOptions {
 }
 
 /** The storage type a smaltdf type is kept as in a new table. */
-const STORAGE: Readonly<Record<DfType, StorageType>> = { int: 'INTEGER', bool: 'INTEGER', real: 'REAL', num: 'NUMERIC', text: 'TEXT', blob: 'BLOB', null: 'ANY', any: 'ANY' };
+const STORAGE: Readonly<Record<DfType, StorageType>> = { int: 'INTEGER', bool: 'BOOLEAN', real: 'REAL', num: 'NUMERIC', text: 'TEXT', blob: 'BLOB', null: 'ANY', any: 'ANY' };
 
 /** Whether a column of type `t` may be written into a table column stored as `s` without changing its values' kind. */
 function fits(t: DfType, s: StorageType): boolean {
   if (s === 'ANY' || t === 'null' || t === 'any') return true;
   switch (t) {
     case 'int':
-    case 'bool':
       return s === 'INTEGER' || s === 'REAL' || s === 'NUMERIC';
+    case 'bool':
+      return s === 'BOOLEAN' || s === 'INTEGER' || s === 'REAL' || s === 'NUMERIC';
     case 'real':
     case 'num':
       return s === 'REAL' || s === 'NUMERIC';

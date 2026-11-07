@@ -39,9 +39,9 @@ describe.each(KINDS)('%s', (kind) => {
     expect(r).toEqual({ rows: 3 });
     const s = await table('stock').collect(db);
     expect(s.columns).toEqual(['name', 'value', 'many']);
-    // bool is kept as an integer column: it reads back as int.
-    expect(s.types).toEqual(['text', 'real', 'int']);
-    expect(s.rows).toEqual([['pen', 15, 1], ['ink', 0, 0], ['pad', 10, 1]]);
+    // bool is stored as BOOLEAN (smaltdb ADR 0018): it reads back as bool.
+    expect(s.types).toEqual(['text', 'real', 'bool']);
+    expect(s.rows).toEqual([['pen', 15, true], ['ink', 0, false], ['pad', 10, true]]);
     expect(await table('items').createTable(db, 'stock', { ifNotExists: true })).toEqual({ rows: 0 });
     await expect(table('items').createTable(db, 'stock')).rejects.toThrow(/stock/);
     // A failing insert leaves no table behind.

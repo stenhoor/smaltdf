@@ -21,13 +21,12 @@ and through the worker, with no other language registered:
 
 ## Next
 
-The types, which come from the engine ([smaltdb ADR 0016](https://smaltdb.dev/adr/0016-plan-api-for-every-language),
-step 11), each with its own engine decision first:
+The engine's types ([smaltdb ADR 0016](https://smaltdb.dev/adr/0016-plan-api-for-every-language), step 11), each with
+its own engine decision first. `bool` and NaN are in ([ADR 0018](https://smaltdb.dev/adr/0018-bool-and-nan)):
+comparisons and logic are the engine's `bool`, a `bool` column written to a table reads back as `bool`, and NaN is a
+value of `real` that sorts after every number (`0 / 0` is NaN). Still to come:
 
-1. `bool` as a type of the engine. smaltdf already types comparisons and logic as `bool` and gives `true` / `false`
-   in results; a `bool` column written to a table reads back as `int` until the engine has the type.
-2. NaN as a value of `real`, distinct from null. Until then, `0 / 0` is null.
-3. Dates and times.
-4. Lists and structs, then `explode`.
+1. Dates and times.
+2. Lists and structs, then `explode`.
 
 Then the package name (`@smaltworks/smaltdf`) and the first release, together with smaltdb 0.9.0.

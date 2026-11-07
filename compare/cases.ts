@@ -56,7 +56,7 @@ export const CASES: readonly Case[] = [
   { id: 'slice', fn: 'slice', df: o().slice(1, 3), polars: "t['orders'].slice(1, 3)" },
 
   // Expressions
-  { id: 'div', fn: 'div', df: n().select(col('a').div(col('b'))), polars: "t['nums'].select(pl.col('a') / pl.col('b'))", differs: '`0 / 0` is null in smaltdf until the engine keeps NaN; Polars gives NaN.' },
+  { id: 'div', fn: 'div', df: n().select(col('a').div(col('b'))), polars: "t['nums'].select(pl.col('a') / pl.col('b'))" },
   { id: 'floor-div', fn: 'floorDiv', df: n().filter(col('b').ne(0)).select(col('a').floorDiv(col('b'))), polars: "t['nums'].filter(pl.col('b') != 0).select(pl.col('a') // pl.col('b'))" },
   { id: 'mod', fn: 'mod', df: n().filter(col('b').ne(0)).select(col('a').mod(col('b'))), polars: "t['nums'].filter(pl.col('b') != 0).select(pl.col('a') % pl.col('b'))" },
   { id: 'div-zero', fn: 'div', df: n().select(col('x').div(0)), polars: "t['nums'].select(pl.col('x') / 0)" },

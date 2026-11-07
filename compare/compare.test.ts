@@ -22,7 +22,7 @@ interface Result {
   readonly error?: string;
 }
 
-const STORAGE = { int: 'INTEGER', real: 'REAL', text: 'TEXT' } as const;
+const STORAGE = { int: 'INTEGER', real: 'REAL', text: 'TEXT', date: 'DATE', datetime: 'DATETIME' } as const;
 const REFERENCE = fileURLToPath(new URL('../docs/REFERENCE.md', import.meta.url));
 const BEGIN = '<!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->';
 const END = '<!-- compare:end -->';
@@ -31,6 +31,8 @@ const END = '<!-- compare:end -->';
 function json(v: unknown): unknown {
   if (typeof v === 'bigint') return v >= -(2n ** 53n) && v <= 2n ** 53n ? Number(v) : { $int: v.toString() };
   if (typeof v === 'number' && !Number.isFinite(v)) return { $real: Number.isNaN(v) ? 'nan' : v > 0 ? 'inf' : '-inf' };
+  // A datetime: collect gives a JS Date (ms).
+  if (v instanceof Date) return { $datetime: v.toISOString().slice(0, 23) };
   return v;
 }
 

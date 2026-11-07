@@ -5,14 +5,14 @@
 import * as p from 'smaltdb/plan';
 import type { AggCall, PlanExpr, SortKey, WindowCall, WindowFrame } from 'smaltdb/plan';
 import { DfError, type DfOrigin } from './errors.js';
-import { type DfColumn, type DfType, isNumeric, planType } from './types.js';
+import { type DfColumn, type DfType, type TemporalType, isNumeric, isTemporal, planType } from './types.js';
 
 /** A value an expression method takes: an expression, or a literal (`lit` is applied). */
-export type ExprLike = Expr | number | bigint | string | boolean | Uint8Array | null;
+export type ExprLike = Expr | number | bigint | string | boolean | Uint8Array | Date | null;
 
 type Node =
   | { readonly k: 'col'; readonly name: string }
-  | { readonly k: 'lit'; readonly value: number | bigint | string | boolean | Uint8Array | null }
+  | { readonly k: 'lit'; readonly value: number | bigint | string | boolean | Uint8Array | Date | null }
   | { readonly k: 'op'; readonly method: string; readonly args: readonly Node[] }
   | { readonly k: 'cast'; readonly to: CastType; readonly arg: Node }
   | { readonly k: 'alias'; readonly name: string; readonly arg: Node }
@@ -55,7 +55,7 @@ export interface AggNode {
   readonly arg: Node | null;
 }
 
-export type CastType = 'int' | 'real' | 'text' | 'blob';
+export type CastType = 'int' | 'real' | 'text' | 'blob' | 'date' | 'datetime';
 
 /** A resolved expression: its plan expression, smaltdf type and output name. */
 export interface Resolved {
@@ -169,13 +169,71 @@ export class Expr {
   }
 
   /** Text methods. */
-  get str(): { lower(): Expr; upper(): Expr; contains(pattern: string): Expr } {
+  get str(): { lower(): Expr; upper(): Expr; contains(pattern: string): Expr; toDate(format?: string): Expr; toDatetime(format?: string): Expr } {
     return {
       lower: () => this.op('str.lower'),
       upper: () => this.op('str.upper'),
       contains: (pattern: string) => this.op('str.contains', pattern),
+      toDate: (format?: string) => (format === undefined ? this.op('str.toDate') : this.op('str.toDate', format)),
+      toDatetime: (format?: string) => (format === undefined ? this.op('str.toDatetime') : this.op('str.toDatetime', format)),
     };
   }
+
+  /** Date and time methods (REFERENCE.md "Dates and times"). */
+  get dt(): DtMethods {
+    const part = (name: string) => () => this.op(`dt.${name}`);
+    return {
+      year: part('year'),
+      month: part('month'),
+      day: part('day'),
+      weekday: part('weekday'),
+      ordinalDay: part('ordinalDay'),
+      hour: part('hour'),
+      minute: part('minute'),
+      second: part('second'),
+      microsecond: part('microsecond'),
+      date: part('date'),
+      truncate: (every: string) => this.op('dt.truncate', every),
+      offsetBy: (by: ExprLike) => this.op('dt.offsetBy', by),
+      strftime: (format: string) => this.op('dt.strftime', format),
+      toZone: (zone: ExprLike) => this.op('dt.toZone', zone),
+      fromZone: (zone: ExprLike, options: { ambiguous?: 'earliest' | 'latest' | 'raise' } = {}) =>
+        options.ambiguous === undefined ? this.op('dt.fromZone', zone) : this.op('dt.fromZone', zone, options.ambiguous),
+      zoneOffset: (zone: ExprLike) => this.op('dt.zoneOffset', zone),
+    };
+  }
+}
+
+/** The `dt` methods of an expression of dates and times. */
+export interface DtMethods {
+  /** The year of a `date` or `datetime`. */
+  year(): Expr;
+  month(): Expr;
+  day(): Expr;
+  /** ISO weekday: Monday is 1, Sunday 7. */
+  weekday(): Expr;
+  /** The day of the year, from 1. */
+  ordinalDay(): Expr;
+  /** The hour of a `datetime` or `time`. */
+  hour(): Expr;
+  minute(): Expr;
+  second(): Expr;
+  /** The µs within the second. */
+  microsecond(): Expr;
+  /** The date of a `datetime`. */
+  date(): Expr;
+  /** Truncated to the start of `every`: `1y`, `1q`, `1mo`, `1w` (Monday), `1d`, `1h`, `1m`, `1s`, `1ms`, `1us`. */
+  truncate(every: string): Expr;
+  /** Moved by text such as `1mo`, `-2d` or `1y3mo` (months keep the day, or take a shorter month's last), or a duration. */
+  offsetBy(by: ExprLike): Expr;
+  /** Text written with a `strftime` format. */
+  strftime(format: string): Expr;
+  /** The wall-clock time in `zone` (an IANA name, `UTC` or `+05:30`; any expression) of a UTC instant. */
+  toZone(zone: ExprLike): Expr;
+  /** The UTC instant of a wall-clock time in `zone`. A time that occurs twice is the earliest unless `ambiguous` says. */
+  fromZone(zone: ExprLike, options?: { ambiguous?: 'earliest' | 'latest' | 'raise' }): Expr;
+  /** The zone's offset from UTC at a UTC instant: a `duration`. */
+  zoneOffset(zone: ExprLike): Expr;
 }
 
 /** A column of the frame, by name. */
@@ -184,8 +242,8 @@ export const col = (name: string): Expr => new Expr({ k: 'col', name });
 /** The number of rows (of the frame, or of each group). */
 export const len = (): Expr => new Expr({ k: 'agg', fn: 'len', arg: null });
 
-/** A constant. A number that is an integer is `int`, any other number `real`. */
-export const lit = (value: number | bigint | string | boolean | Uint8Array | null): Expr => new Expr({ k: 'lit', value });
+/** A constant. A number that is an integer is `int`, any other number `real`; a JS `Date` is a `datetime`. */
+export const lit = (value: number | bigint | string | boolean | Uint8Array | Date | null): Expr => new Expr({ k: 'lit', value });
 
 // ------------------------------------------------------------------ resolving
 
@@ -198,11 +256,34 @@ function literal(value: Node & { k: 'lit' }): { plan: PlanExpr; type: DfType } {
   if (typeof v === 'bigint') return { plan: p.lit(v, 'int'), type: 'int' };
   if (typeof v === 'number') return { plan: p.lit(v, Number.isInteger(v) ? 'int' : 'real'), type: Number.isInteger(v) ? 'int' : 'real' };
   if (typeof v === 'string') return { plan: p.lit(v, 'text'), type: 'text' };
+  if (v instanceof Date) {
+    const ms = v.getTime();
+    if (Number.isNaN(ms)) throw new DfError('SMALTDF_RANGE', 'lit: an invalid Date');
+    return { plan: p.lit(ms * 1000, 'datetime'), type: 'datetime' };
+  }
   return { plan: p.lit(v, 'blob'), type: 'blob' };
 }
 
 /** The result of arithmetic: int for two ints, real for any real, else known only when it runs. */
 const arith = (a: DfType, b: DfType): DfType => (a === 'real' || b === 'real' ? 'real' : a === 'int' && b === 'int' ? 'int' : 'num');
+
+/**
+ * The type of `a m b` (add, sub, mul) where a date or time is involved, as the engine gives it (smaltdb ADR 0019), or
+ * undefined where it isn't defined.
+ */
+function temporalArith(m: string, a: DfType, b: DfType): DfType | undefined {
+  const either = (x: DfType, y: DfType): boolean => (a === x && b === y) || (a === y && b === x);
+  if (m === 'sub') {
+    if (a === b && (a === 'datetime' || a === 'date' || a === 'time' || a === 'duration')) return 'duration';
+    if (a === 'datetime' && b === 'duration') return 'datetime';
+  }
+  if (m === 'add') {
+    if (either('datetime', 'duration')) return 'datetime';
+    if (a === 'duration' && b === 'duration') return 'duration';
+  }
+  if (m === 'mul' && either('duration', 'int')) return 'duration';
+  return undefined;
+}
 
 /** Two types a comparison may compare: numbers with numbers, text with text, and so on. */
 function comparable(a: DfType, b: DfType): boolean {
@@ -210,6 +291,9 @@ function comparable(a: DfType, b: DfType): boolean {
   if (isNumeric(a) && isNumeric(b)) return true;
   return a === b;
 }
+
+/** Text compared with a date or datetime is read as one (strictly: text that isn't one is an error). */
+const TEXT_AS: Readonly<Record<string, string>> = { date: 'cast_date', datetime: 'cast_datetime' };
 
 const OPS: Readonly<Record<string, string>> = {
   add: 'add_checked',
@@ -230,7 +314,7 @@ const OPS: Readonly<Record<string, string>> = {
   'str.contains': 'regex_match',
 };
 
-const CASTS: Readonly<Record<CastType, string>> = { int: 'cast_integer_strict', real: 'cast_real_strict', text: 'cast_text', blob: 'cast_blob' };
+const CASTS: Readonly<Record<CastType, string>> = { int: 'cast_integer_strict', real: 'cast_real_strict', text: 'cast_text', blob: 'cast_blob', date: 'cast_date', datetime: 'cast_datetime' };
 
 /** `e` resolved against `scope`; errors name the frame method and the expression method. */
 export function resolve(e: Expr | string, scope: Scope): Resolved {
@@ -259,7 +343,9 @@ function resolveNode(n: Node, scope: Scope): Resolved {
       const a = resolveNode(n.arg, scope);
       if (a.type === 'bool' && n.to === 'int') return { ...a, type: 'int' };
       const fn = CASTS[n.to];
-      return { plan: withOrigin(p.cast(fn, a.plan, n.to), { step: scope.step, method: 'cast' }), type: n.to, name: a.name };
+      // Dates and times convert with the engine's strict casts, which are calls (a cast node names SQL's conversions).
+      const plan = n.to === 'date' || n.to === 'datetime' ? p.call(fn, [a.plan], n.to) : p.cast(fn, a.plan, n.to);
+      return { plan: withOrigin(plan, { step: scope.step, method: 'cast' }), type: n.to, name: a.name };
     }
     case 'op':
       return resolveOp(n, scope);
@@ -323,8 +409,8 @@ export function resolveAggregate(n: AggNode, input: Scope): { call: AggCall; typ
   let type: DfType;
   switch (n.fn) {
     case 'sum':
-      need(numeric, 'takes numbers');
-      type = a.type === 'real' ? 'real' : a.type === 'int' || a.type === 'bool' ? 'int' : 'num';
+      need(numeric || a.type === 'duration', 'takes numbers or durations');
+      type = a.type === 'duration' ? 'duration' : a.type === 'real' ? 'real' : a.type === 'int' || a.type === 'bool' ? 'int' : 'num';
       break;
     case 'mean':
     case 'median':
@@ -355,9 +441,15 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
   switch (m) {
     case 'add':
     case 'sub':
-    case 'mul':
+    case 'mul': {
+      if (isTemporal(a.type) || isTemporal(b!.type)) {
+        const t = temporalArith(m, a.type, b!.type);
+        need(t !== undefined, 'takes numbers, or dates and times as their arithmetic allows (datetime - datetime, datetime + duration, …)');
+        return out(p.call(OPS[m]!, [a.plan, b!.plan], planType(t!)), t!);
+      }
       need(isNumeric(a.type) && isNumeric(b!.type), 'takes numbers');
       return out(p.call(OPS[m]!, [a.plan, b!.plan], planType(arith(a.type, b!.type))), arith(a.type, b!.type));
+    }
     case 'div':
       need(isNumeric(a.type) && isNumeric(b!.type), 'takes numbers');
       return out(p.call('div_float', [a.plan, b!.plan], 'real'), 'real');
@@ -373,9 +465,15 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
     case 'le':
     case 'gt':
     case 'ge':
-    case 'eqMissing':
-      need(comparable(a.type, b!.type), 'compares values of one kind');
-      return out(p.call(OPS[m]!, [a.plan, b!.plan], 'int', 'binary'), 'bool');
+    case 'eqMissing': {
+      // A text literal compared with a date or datetime is read as one.
+      const asTemporal = (x: Resolved, other: Resolved): Resolved =>
+        TEXT_AS[other.type] && x.type === 'text' && x.plan.k === 'lit' ? { ...x, plan: p.call(TEXT_AS[other.type]!, [x.plan], planType(other.type)), type: other.type } : x;
+      const l = asTemporal(a, b!);
+      const r = asTemporal(b!, a);
+      need(comparable(l.type, r.type), 'compares values of one kind');
+      return out(p.call(OPS[m]!, [l.plan, r.plan], 'int', 'binary'), 'bool');
+    }
     case 'and':
     case 'or':
       need(isBool(a.type) && isBool(b!.type), 'takes bool values');
@@ -397,8 +495,85 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
     case 'str.contains':
       need(isText(a.type) && b!.type === 'text', 'takes text and a pattern');
       return out(p.call('regex_match', [a.plan, b!.plan], 'int'), 'bool');
+    case 'str.toDate':
+    case 'str.toDatetime': {
+      need(isText(a.type) && (b === undefined || b.type === 'text'), 'takes text and a format');
+      const t: TemporalType = m === 'str.toDate' ? 'date' : 'datetime';
+      const cast = t === 'date' ? 'cast_date' : 'cast_datetime';
+      if (b === undefined) return out(p.call(cast, [a.plan], t), t);
+      // Strict, as without a format: text the format doesn't read goes to the cast marked with the format, so the
+      // cast fails and its error names both (text that is a date in the result format, but not in this format, too).
+      const parsed = p.call(t === 'date' ? 'parse_date' : 'parse_datetime', [a.plan, b.plan], t);
+      const marked = p.call('text_concat', [a.plan, p.call('text_concat', [p.lit(' (format ', 'text'), p.call('text_concat', [b.plan, p.lit(')', 'text')], 'text')], 'text')], 'text');
+      return out(p.call(cast, [p.call('coalesce', [parsed, marked], 'any')], t), t);
+    }
     default:
+      if (m.startsWith('dt.')) return resolveDt(m.slice(3), args, scope, out, need);
       throw new DfError('SMALTDF_TYPE', `${scope.step}: unknown method ${m}`);
+  }
+}
+
+const DT_PARTS: Readonly<Record<string, [string, readonly DfType[]]>> = {
+  year: ['year', ['date', 'datetime']],
+  month: ['month', ['date', 'datetime']],
+  day: ['day', ['date', 'datetime']],
+  weekday: ['weekday', ['date', 'datetime']],
+  ordinalDay: ['day_of_year', ['date', 'datetime']],
+  hour: ['hour', ['datetime', 'time']],
+  minute: ['minute', ['datetime', 'time']],
+  second: ['second', ['datetime', 'time']],
+  microsecond: ['microsecond', ['datetime', 'time']],
+};
+
+/** Polars' `every` strings for truncation, as the engine's units. */
+const EVERY: Readonly<Record<string, string>> = { '1y': 'year', '1q': 'quarter', '1mo': 'month', '1w': 'week', '1d': 'day', '1h': 'hour', '1m': 'minute', '1s': 'second', '1ms': 'millisecond', '1us': 'microsecond' };
+const AMBIGUOUS: Readonly<Record<string, string>> = { earliest: 'earlier', latest: 'later', raise: 'reject' };
+
+function resolveDt(
+  name: string,
+  args: readonly Resolved[],
+  scope: Scope,
+  out: (plan: PlanExpr, type: DfType) => Resolved,
+  need: (ok: boolean, what: string) => void,
+): Resolved {
+  const [a, b, c] = args as [Resolved, Resolved | undefined, Resolved | undefined];
+  const of = (...ts: DfType[]): boolean => ts.includes(a.type) || a.type === 'null';
+  const text = (x: Resolved | undefined): boolean => x !== undefined && (x.type === 'text' || x.type === 'null' || x.type === 'any');
+  const list = (ts: readonly DfType[]): string => ts.join(' or ');
+  const part = DT_PARTS[name];
+  if (part) {
+    need(of(...part[1]), `takes a ${list(part[1])}`);
+    return out(p.call(part[0], [a.plan], 'int'), 'int');
+  }
+  switch (name) {
+    case 'date':
+      need(of('datetime'), 'takes a datetime');
+      return out(p.call('cast_date', [a.plan], 'date'), 'date');
+    case 'truncate': {
+      need(of('date', 'datetime', 'time'), 'takes a date, datetime or time');
+      const every = b!.plan.k === 'lit' ? EVERY[String(b!.plan.value)] : undefined;
+      if (every === undefined) throw new DfError('SMALTDF_RANGE', `${scope.step}: dt.truncate: every is one of ${Object.keys(EVERY).join(', ')}`);
+      return out(p.call('trunc_temporal', [a.plan, p.lit(every, 'text')], planType(a.type)), a.type);
+    }
+    case 'offsetBy':
+      need(of('date', 'datetime') && (text(b) || b!.type === 'duration'), 'takes a date or datetime, and text such as 1mo or a duration');
+      return out(p.call('offset_by', [a.plan, b!.plan], planType(a.type)), a.type);
+    case 'strftime':
+      need(of('date', 'datetime', 'time') && text(b), 'takes a date, datetime or time, and a format');
+      return out(p.call('format_temporal', [a.plan, b!.plan], 'text'), 'text');
+    case 'toZone':
+      need(of('datetime') && text(b), 'takes a datetime and a zone');
+      return out(p.call('to_zone', [a.plan, b!.plan], 'datetime'), 'datetime');
+    case 'fromZone': {
+      need(of('datetime') && text(b), 'takes a datetime and a zone');
+      const how = c === undefined ? [] : [p.lit(AMBIGUOUS[String(c.plan.k === 'lit' ? c.plan.value : '')] ?? 'compatible', 'text')];
+      return out(p.call('from_zone', [a.plan, b!.plan, ...how], 'datetime'), 'datetime');
+    }
+    case 'zoneOffset':
+      need(of('datetime') && text(b), 'takes a datetime and a zone');
+      return out(p.call('zone_offset', [a.plan, b!.plan], 'duration'), 'duration');
+    default:
+      throw new DfError('SMALTDF_TYPE', `${scope.step}: unknown method dt.${name}`);
   }
 }
 

@@ -14,7 +14,7 @@ it('imports nothing of smaltdb at run time but smaltdb/plan', () => {
     for (const m of text.matchAll(/^import\s+(type\s+)?[^;]*?from\s+'([^']+)'/gms)) {
       const [, typeOnly, spec] = m;
       if (spec!.startsWith('./')) continue;
-      if (typeOnly) expect(spec, f).toMatch(/^smaltdb(\/plan|\/engine)?$/);
+      if (typeOnly) expect(spec, f).toMatch(/^smaltdb(\/plan|\/engine|\/language)?$/);
       else expect(spec, `${f} imports ${spec} at run time`).toBe('smaltdb/plan');
     }
   }

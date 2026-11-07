@@ -6,8 +6,9 @@ import * as p from 'smaltdb/plan';
 import type { AggCall, CatalogData, CatalogTable, PlanExpr, PlanOp, PlanStatementInput, SortKey, ValueColumn } from 'smaltdb/plan';
 import { DfError, fromEngine } from './errors.js';
 import { type CreateTableOptions, type InsertOptions, type WriteResult, createTable, insertInto } from './write.js';
+import { type ViewOptions, createView } from './view.js';
 import { type AggNode, Expr, type Resolved, type ResolvedWindow, type Scope, col, hasAggregate, len, readsColumns, resolve, resolveAggregate, resolveWindow } from './expr.js';
-import { type DfColumn, type DfType, planType } from './types.js';
+import { DF_LANGUAGE, type DfColumn, type DfType, planType } from './types.js';
 
 /** What a frame's statement is built and run with: an engine `Database` (in process) or a client `Database`. */
 export interface Db {
@@ -156,14 +157,22 @@ export class GroupBy {
   }
 }
 
-/** Looks up tables: the engine's catalog, in process or as the client's snapshot. */
-export type Tables = (name: string) => CatalogTable | undefined;
+/** A view as a frame reads it: its language and source text, and the column names given with it. */
+export interface ViewInfo {
+  readonly name: string;
+  readonly language: string;
+  readonly text: string;
+  readonly columns?: readonly string[];
+}
+
+/** Looks up tables (the engine's catalog, in process or as the client's snapshot), and views by `view`. */
+export type Tables = ((name: string) => CatalogTable | undefined) & { readonly view?: (name: string) => ViewInfo | undefined };
 
 export class Frame {
   /** @internal */
   constructor(
-    private readonly root: Root,
-    private readonly steps: readonly Step[],
+    /** @internal */ readonly root: Root,
+    /** @internal */ readonly steps: readonly Step[],
   ) {}
 
   /** What error messages call the frame's rows. */
@@ -189,6 +198,11 @@ export class Frame {
   /** A new table with the frame's columns and types, holding its rows; both in one transaction. */
   createTable(db: Db, name: string, options: CreateTableOptions = {}): Promise<WriteResult> {
     return createTable(this, db, name, options);
+  }
+
+  /** Stores the frame as view `name`, read by name with `table(name)`; `materialized` keeps its rows. */
+  createView(db: Db, name: string, options: ViewOptions = {}): Promise<void> {
+    return createView(this, db, name, options);
   }
 
   /** Rows drawn at random: `n` of them, or a `fraction`. */
@@ -427,7 +441,13 @@ export class Frame {
       return { op: p.fromColumns(cs.map((c) => c.data), cs.map((c) => planType(c.type))), columns: cs.map((c) => ({ name: c.name, type: c.type })) };
     }
     const t = tables(this.root.name);
-    if (!t) throw new DfError('SMALTDF_SCHEMA', `table: no table or view "${this.root.name}"`);
+    if (!t) {
+      const v = tables.view?.(this.root.name);
+      if (!v) throw new DfError('SMALTDF_SCHEMA', `table: no table or view "${this.root.name}"`);
+      const columns = viewColumns(v);
+      // The engine binds the view where the plan reads it, by its language (smaltdf's: dfLanguage).
+      return { op: p.scan(v.name, columns.map((_, i) => i)), columns };
+    }
     return { op: p.scan(t.name, t.columns.map((_, i) => i), t.schema === 'temp' ? { db: 'temp' } : {}), columns: t.columns.map((c) => ({ name: c.name, type: c.type })) };
   }
 }
@@ -541,6 +561,13 @@ function pivotStep(input: Built, scope: Scope, on: string, o: PivotOptions): Bui
   const columns = [...keys.map((k) => ({ name: k.name, type: k.type })), ...values.map((v) => ({ name: v === null ? 'null' : String(v), type: agg.type }))];
   if (new Set(columns.map((c) => c.name)).size !== columns.length) throw new DfError('SMALTDF_SCHEMA', `pivot: a value of ${on} names a column the index has (${columns.map((c) => c.name).join(', ')})`);
   return { op: p.project(op0, [...keys.map((k, i) => p.col(0, i, planType(k.type))), ...cells]), columns };
+}
+
+/** A view's columns: a smaltdf view stores them with its frame; another language's view gives names only (`any`). */
+function viewColumns(v: ViewInfo): DfColumn[] {
+  if (v.language === DF_LANGUAGE) return (JSON.parse(v.text) as { columns: DfColumn[] }).columns;
+  if (v.columns?.length) return v.columns.map((name) => ({ name, type: 'any' }));
+  throw new DfError('SMALTDF_SCHEMA', `table: view ${v.name} is written in ${v.language} and gives no column names: smaltdf can't tell its columns`);
 }
 
 /** The frames' rows one after another: the first frame's, in its order, then the next's. Columns must match. */
@@ -714,12 +741,13 @@ function unique(step: string, rs: readonly Resolved[]): void {
 /** The tables of `db`: the client's catalog snapshot, or the engine's catalog in process. */
 /** @internal */
 export async function tablesOf(db: Db): Promise<Tables> {
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
   if (typeof db.catalog === 'function') {
     const data = (await (db.catalog as () => Promise<CatalogData>).call(db)) as CatalogData;
-    return (name) => data.tables.find((t) => t.name.toLowerCase() === name.toLowerCase());
+    return Object.assign((name: string) => data.tables.find((t) => same(t.name, name)), { view: (name: string) => data.views.find((v) => same(v.name, name)) });
   }
-  const c = db.catalog as { table(name: string): CatalogTable | undefined };
-  return (name) => c.table(name);
+  const c = db.catalog as { table(name: string): CatalogTable | undefined; view(name: string): ViewInfo | undefined };
+  return Object.assign((name: string) => c.table(name), { view: (name: string) => c.view(name) });
 }
 
 async function run(db: Db, statement: PlanStatementInput): Promise<{ columns: string[]; rows: unknown[][] }> {

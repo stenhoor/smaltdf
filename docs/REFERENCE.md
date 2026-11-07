@@ -204,7 +204,36 @@ reads as null) or an array of values of one kind: numbers (`int` when all are in
 the safe range comes back as a number. A frame of data joins tables and takes every method. Through the client, typed
 arrays cross to the worker as binary data.
 
+## Writing
+
+```ts
+import { col, deleteFrom, frame, table, update } from '@smaltdb/df';
+
+await frame({ id: [4, 5], name: ['cup', 'mug'] }).insertInto(db, 'items');
+await table('items').groupBy('name').agg(col('qty').sum()).createTable(db, 'totals');
+await update('items', { set: { qty: col('qty').add(1) }, where: col('id').eq(4) }).run(db);
+await deleteFrom('items', { where: col('qty').eq(0) }).run(db);
+```
+
+Each resolves to `{ rows }`: the number of rows written, changed or deleted.
+
+`frame.insertInto(db, table, { onConflict? })` writes the frame's rows into `table` by column name; the table's other
+columns take their defaults. Each frame column must fit its table column: `int` and `bool` into an `INTEGER`, `REAL`
+or `NUMERIC` column, `real` into `REAL` or `NUMERIC`, `text` into `TEXT`, `blob` into `BLOB`, anything into `ANY`.
+A row that breaks a constraint undoes the whole write (`onConflict: 'abort'`, the default), is skipped (`ignore`),
+or replaces the row it conflicts with (`replace`).
+
+`frame.createTable(db, name, { storage?, ifNotExists? })` makes a table with the frame's columns and types (`int` and
+`bool` as `INTEGER`, `real` as `REAL`, `num` as `NUMERIC`, `text` as `TEXT`, `blob` as `BLOB`, others as `ANY`; a
+`bool` column reads back as `int`) and writes the frame's rows into it, in one transaction: if the rows fail, there is
+no table. `storage` is `row` (default) or `columnar`. With `ifNotExists`, an existing table is left as it is and
+nothing is written.
+
+`update(table, { set, where?, onConflict? }).run(db)` sets each column of `set` (a name to an expression or a value)
+in the rows `where` is true for, all rows without it; the expressions read the row as it was before the update.
+`deleteFrom(table, { where? }).run(db)` deletes the rows `where` is true for, or all. Both have `plan(db)`.
+
 ## Not yet in the language
 
-Writes and views follow the order of work in [DESIGN.md](DESIGN.md). Dates and times, lists and structs follow the
-engine's types (smaltdb ADR 0016 step 11).
+Views follow the order of work in [DESIGN.md](DESIGN.md). Dates and times, lists and structs follow the engine's types
+(smaltdb ADR 0016 step 11).

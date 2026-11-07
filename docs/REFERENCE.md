@@ -92,7 +92,48 @@ overflows is an error, as integer arithmetic is.
 columns by default): the first (`keep: 'first'`, the default) or the last of each. Rows come in no particular order
 unless `maintainOrder: true`.
 
+## Joins
+
+```ts
+import { col, concat, table } from '@smaltdb/df';
+
+table('orders').join(table('customers'), { on: 'cust', how: 'left' });
+table('trades').joinAsof(table('quotes'), { on: 't', by: 'sym' });
+concat([table('jan'), table('feb')]);
+```
+
+`join(other, { on | leftOn and rightOn, how?, suffix?, maintainOrder? })` matches rows whose keys are equal. A null key
+matches nothing. Keys compare as comparisons do: numbers with numbers, text with text.
+
+| `how` | Rows |
+|---|---|
+| `inner` (default) | Each pair of matching rows |
+| `left` | Those, and each left row without a match, with nulls for the right columns |
+| `right` | Those, and each right row without a match, with nulls for the left columns |
+| `full` | Both of the above |
+| `semi` | The left rows that have a match, once each; the left columns only |
+| `anti` | The left rows that have none; the left columns only |
+| `cross` | Every left row with every right row; no keys |
+
+The result has the left columns, then the right's. Keys named by `on` appear once: the left side's, the right's for
+`right`, and whichever side has one for `full`. With `leftOn` / `rightOn` (names or expressions) both sides' columns
+stay. A right column whose name the left side has takes `suffix` (default `_right`); if that name is taken too, it is
+an error.
+
+Order: `semi` and `anti` keep the left side's order. The others give rows in no particular order unless
+`maintainOrder: true`: the left side's order, each left row's matches in the right side's order, and for `right` and
+`full` the unmatched right rows last.
+
+`joinAsof(other, { on | leftOn and rightOn, by?, strategy?, tolerance?, suffix? })` gives each left row, in the left
+order, the right row whose key is nearest its own: `backward` (default) the last at or before it, `forward` the first
+at or after it, `nearest` the closest (ties to the smaller key). `by` names columns of both sides that must also be
+equal; `tolerance` is the largest distance between the keys. Without a match the right columns are null. The right
+side's `on` and `by` columns are not repeated.
+
+`concat(frames)` gives the first frame's rows, in its order, then the next frame's, and so on. The frames have the
+same column names, in the same order, and each column has one type.
+
 ## Not yet in the language
 
-Joins, windows, reshaping, data from JavaScript, writes and views follow the order of work in
-[DESIGN.md](DESIGN.md). Dates and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
+Windows, reshaping, data from JavaScript, writes and views follow the order of work in [DESIGN.md](DESIGN.md). Dates
+and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).

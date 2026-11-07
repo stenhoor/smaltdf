@@ -5,6 +5,6 @@
  * smaltdf generates or runs SQL.
  */
 export { type AsofOptions, type DfResult, type Db, Frame, GroupBy, type GroupByOptions, type JoinHow, type JoinOptions, type SortOptions, type UniqueOptions, concat, table } from './frame.js';
-export { type AggFn, type CastType, Expr, type ExprLike, col, len, lit } from './expr.js';
+export { type AggFn, type CastType, Expr, type ExprLike, type RankMethod, type WinFn, col, len, lit } from './expr.js';
 export { DfError } from './errors.js';
 export type { DfColumn, DfType } from './types.js';

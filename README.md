@@ -5,9 +5,11 @@
   </picture>
 </h1>
 
-**Small. Alternative. Frames.**
+<a href="https://smaltworks.dev/stability"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/stenhoor/smalt-brand/main/badges/work-in-progress-on-dark.svg"><img alt="Work in progress. Come build with us." src="https://raw.githubusercontent.com/stenhoor/smalt-brand/main/badges/work-in-progress.svg" height="56"></picture></a>
 
-Dataframes for [smaltdb](https://github.com/stenhoor/smaltdb). Small and fast.
+**Small. Alternative. Frames.** Dataframes for [smaltdb](https://github.com/stenhoor/smaltdb). Small and fast.
+
+[Documentation](https://stenhoor.github.io/smaltdf/) · [smaltworks.dev](https://smaltworks.dev)
 
 smaltdf is a TypeScript language for smaltdb with dataframe interfaces: frames, expressions and method chains that
 run in the smaltdb engine, on its row and columnar tables. It builds plans for the engine's shared plan layer, the
@@ -30,4 +32,8 @@ npm ci && npm run deps   # deps: the pinned smaltdb build from packed.json
 npm run check            # type-check and test
 ```
 
-See [CLAUDE.md](CLAUDE.md). MIT licence.
+See [CLAUDE.md](CLAUDE.md).
+
+<a href="https://smaltworks.dev"><picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/stenhoor/smalt-brand/main/badges/a-smaltworks-project-on-dark.svg"><img alt="A smaltworks project" src="https://raw.githubusercontent.com/stenhoor/smalt-brand/main/badges/a-smaltworks-project.svg" height="28"></picture></a>
+
+MIT License.

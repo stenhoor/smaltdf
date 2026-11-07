@@ -2,6 +2,7 @@ import { defineConfig } from 'vitepress'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { smaltLight, smaltDark } from './theme/shiki'
+import { smaltworksMenu, smaltworksFooter } from './theme/smaltworks'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const REPO = 'https://github.com/stenhoor/smaltdf'
@@ -50,16 +51,7 @@ export default defineConfig({
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'Reference', link: '/REFERENCE' },
       { text: 'Status', link: '/guide/status' },
-      {
-        text: 'smaltdb',
-        items: [
-          { text: 'The engine', link: `${ENGINE}/reference/engine/` },
-          { text: 'The plan format', link: `${ENGINE}/reference/engine/plans` },
-          { text: 'Engine API', link: `${ENGINE}/reference/api/engine` },
-          { text: 'Error codes', link: `${ENGINE}/reference/api/errors` },
-          { text: 'Roadmap', link: `${ENGINE}/ROADMAP` },
-        ],
-      },
+      smaltworksMenu(),
     ],
     sidebar: [
       {
@@ -92,6 +84,6 @@ export default defineConfig({
     socialLinks: [{ icon: 'github', link: REPO }],
     search: { provider: 'local' },
     outline: { level: [2, 3] },
-    footer: { message: 'MIT License', copyright: 'smaltdf' },
+    footer: smaltworksFooter(base),
   },
 })

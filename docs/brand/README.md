@@ -15,3 +15,6 @@ language layer's cobalt magenta (`#B0249F`; text `#981C89`, on dark `#F57FE6`). 
 | `favicon-32.svg`, `favicon-16.svg` | Browser tabs. |
 
 The `-on-dark` files are transparent with light ink: they are for dark backgrounds only and look blank in light previews.
+
+The stage badge (`work-in-progress.svg`, `-on-dark`) and the family badge (`a-smaltworks-project.svg`, `-on-dark`) are
+copied from smalt-brand `badges/` (commit `8396e75`), for the site.

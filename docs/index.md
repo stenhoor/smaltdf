@@ -2,7 +2,7 @@
 layout: home
 
 hero:
-  name: 'sm<span class="alt">alt</span><span class="suffix">df</span>'
+  name: 'sm<span class="alt">alt</span><span class="suffix language">df</span>'
   text: Small. Alternative. Frames.
   tagline: Dataframes for smaltdb. Small and fast.
   image:

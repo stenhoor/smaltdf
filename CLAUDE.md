@@ -17,8 +17,9 @@ the two share, to show users where they differ.
 
 ## Status
 
-Design stage, ready to build: the plan layer (smaltdb ADR 0014, 0015 step 8, 0016 steps 1–10) is in smaltdb. The order of work
-is in [docs/DESIGN.md](docs/DESIGN.md), the language in [docs/REFERENCE.md](docs/REFERENCE.md). An earlier
+In development, not published: core frames (step 2 of [docs/DESIGN.md](docs/DESIGN.md)) are in; the order of work is in
+DESIGN.md, the language in [docs/REFERENCE.md](docs/REFERENCE.md). Tests run with no language registered (`test/boundary.test.ts`
+keeps `src/` on `smaltdb/plan`). An earlier
 version that compiled to SQL was merged and then removed; don't restore any of it.
 
 ## Commands

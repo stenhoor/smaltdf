@@ -11,11 +11,11 @@ export default defineConfig({
     alias: [
       { find: /^smaltdb$/, replacement: core('client/index.ts') },
       { find: /^smaltdb\/engine$/, replacement: core('engine/index.ts') },
+      { find: /^smaltdb\/plan$/, replacement: core('engine/plan/portable.ts') },
       { find: /^smaltdb\/worker-runtime$/, replacement: core('engine/worker-runtime.ts') },
       { find: /^smaltdb-src\/(.*)\.js$/, replacement: core('$1.ts') },
     ],
   },
   server: { deps: { inline: [/node_modules\/smaltdb\//] } },
-  // No tests until the language exists (docs/DESIGN.md).
-  test: { include: ['test/**/*.test.ts'], passWithNoTests: true },
+  test: { include: ['test/**/*.test.ts'] },
 });

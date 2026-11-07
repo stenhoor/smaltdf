@@ -233,7 +233,30 @@ nothing is written.
 in the rows `where` is true for, all rows without it; the expressions read the row as it was before the update.
 `deleteFrom(table, { where? }).run(db)` deletes the rows `where` is true for, or all. Both have `plan(db)`.
 
+## Views
+
+```ts
+import { registerLanguage } from 'smaltdb/engine'; // in a worker entry: defineWorker({ languages: [dfLanguage] })
+import { col, dfLanguage, refreshView, table } from '@smaltdb/df';
+
+registerLanguage(dfLanguage);
+await table('orders').filter(col('qty').gt(5)).createView(db, 'big');
+await table('big').join(table('regions'), { on: 'region' }).collect(db);
+await table('orders').groupBy('region').agg(col('qty').sum()).createView(db, 'totals', { materialized: true });
+await refreshView(db, 'totals');
+```
+
+`frame.createView(db, name, { materialized?, ifNotExists? })` stores the frame by name. `table(name)` reads it as it
+reads a table, and its rows follow the tables it reads. A materialized view keeps its rows until `refreshView(db,
+name)`.
+
+A view is stored as smaltdf's own serialized frame, with its columns, and is bound where a plan reads it by
+`dfLanguage`: register it where the engine runs, with `registerLanguage(dfLanguage)` in process or
+`defineWorker({ languages: [dfLanguage] })` in a worker entry. A view reads tables and views, not data from JavaScript
+(`frame(…)`), and a pivot in it keeps the columns it had when the view was made. Views of other languages can be read
+when they give their column names (their types are then `any`).
+
 ## Not yet in the language
 
-Views follow the order of work in [DESIGN.md](DESIGN.md). Dates and times, lists and structs follow the engine's types
-(smaltdb ADR 0016 step 11).
+Dates and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11). The Polars comparison tests
+are step 9 of [DESIGN.md](DESIGN.md).

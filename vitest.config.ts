@@ -12,6 +12,7 @@ export default defineConfig({
       { find: /^smaltdb$/, replacement: core('client/index.ts') },
       { find: /^smaltdb\/engine$/, replacement: core('engine/index.ts') },
       { find: /^smaltdb\/plan$/, replacement: core('engine/plan/portable.ts') },
+      { find: /^smaltdb\/language$/, replacement: core('engine/language-support.ts') },
       { find: /^smaltdb\/worker-runtime$/, replacement: core('engine/worker-runtime.ts') },
       { find: /^smaltdb-src\/(.*)\.js$/, replacement: core('$1.ts') },
     ],

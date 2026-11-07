@@ -19,3 +19,6 @@ export function planType(t: DfType): PlanType {
 
 /** A numeric type, or one only known when the statement runs (`num`, `any`). */
 export const isNumeric = (t: DfType): boolean => t === 'int' || t === 'real' || t === 'num' || t === 'any' || t === 'null';
+
+/** The name smaltdf's views record as their language (in this module, which imports nothing of smaltdf's: no cycle). */
+export const DF_LANGUAGE = 'df';

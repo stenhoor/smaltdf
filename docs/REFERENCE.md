@@ -1,6 +1,6 @@
 # smaltdf reference (v0)
 
-Draft: the part of the language that steps 2–5 of [DESIGN.md](DESIGN.md) implement, with the owner's decisions of
+Draft: the part of the language that steps 2–9 of [DESIGN.md](DESIGN.md) implement, with the owner's decisions of
 2026-11-07.
 
 ## Frames
@@ -90,7 +90,7 @@ overflows is an error, as integer arithmetic is.
 
 `unique({ subset?, keep?, maintainOrder? })` keeps one row per distinct value of `subset` (one name or several; all
 columns by default): the first (`keep: 'first'`, the default) or the last of each. Rows come in no particular order
-unless `maintainOrder: true`.
+unless `maintainOrder: true`, which gives them in order of each group's first row (for `keep: 'last'` too).
 
 ## Joins
 
@@ -258,5 +258,31 @@ when they give their column names (their types are then `any`).
 
 ## Not yet in the language
 
-Dates and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11). The Polars comparison tests
-are step 9 of [DESIGN.md](DESIGN.md).
+Dates and times, lists and structs follow the engine's types (smaltdb ADR 0016 step 11).
+
+## Compared with Polars
+
+Polars inspired smaltdf's functions, and many give the same results. The comparison tests (`compare/`, run in their
+own CI job) run each case both ways over the same tables, and fail when a result changes, so the table below stays
+true. Order is compared too, except where neither side promises one (`groupBy` and joins without `maintainOrder`).
+
+<!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->
+
+With Polars 2.1.0, 46 of the 55 cases give the same columns, types and rows (or both an
+error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `floorDiv`, `mod`, `div`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`.
+
+These differ:
+
+| Function | Difference |
+|---|---|
+| `div` | `0 / 0` is null in smaltdf until the engine keeps NaN; Polars gives NaN. |
+| `add` | An integer overflow is an error in smaltdf (decision E); Polars wraps around. |
+| `unique` | With `keep: 'last'` and `maintainOrder`, smaltdf gives the rows in order of each group's first row; Polars in order of the rows it keeps. |
+| `join` | A `full` join gives its `on` keys once in smaltdf, from whichever side has them; Polars keeps both sides' (`region`, `region_right`) unless `coalesce=True`. |
+| `join` | A `right` join keeps the key column in the left side's place in smaltdf; Polars moves it to just before the right side's other columns. |
+| `joinAsof` | `nearest` takes the smaller key when two are equally near in smaltdf; Polars takes the larger. |
+| `rank` | `rank()` is `min` by default in smaltdf, an integer; Polars' default is `average`, a real. |
+| `pivot` | Without `columns`, smaltdf orders the new columns by value; Polars by first appearance. |
+| `unpivot` | smaltdf gives each row's columns together (row by row); Polars gives each column's rows together (column by column). |
+
+<!-- compare:end -->

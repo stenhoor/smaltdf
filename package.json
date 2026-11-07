@@ -41,6 +41,7 @@
     "typecheck": "node scripts/fetch-packed.mjs --check && tsc -p tsconfig.json",
     "test": "node scripts/fetch-packed.mjs --check && vitest run",
     "check": "npm run typecheck && npm test",
+    "compare": "node scripts/fetch-packed.mjs --check && vitest run --config vitest.compare.config.ts",
     "prepublishOnly": "npm run check && npm run build"
   },
   "peerDependencies": {

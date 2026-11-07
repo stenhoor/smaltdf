@@ -17,7 +17,7 @@ the two share, to show users where they differ.
 
 ## Status
 
-In development, not published: core frames, aggregation, joins, windows, reshaping, JavaScript data, writing and views (steps 2–8 of [docs/DESIGN.md](docs/DESIGN.md)) are in; the order of work is in
+In development, not published: core frames, aggregation, joins, windows, reshaping, JavaScript data, writing, views and the Polars comparison tests (steps 2–9 of [docs/DESIGN.md](docs/DESIGN.md)) are in; the order of work is in
 DESIGN.md, the language in [docs/REFERENCE.md](docs/REFERENCE.md). Tests run with no language registered (`test/boundary.test.ts`
 keeps `src/` on `smaltdb/plan`). An earlier
 version that compiled to SQL was merged and then removed; don't restore any of it.
@@ -28,6 +28,7 @@ version that compiled to SQL was merged and then removed; don't restore any of i
 |---|---|---|
 | `npm ci && npm run deps` | Installs dependencies, then the pinned smaltdb build in `packed.json` | First, and again after every `npm ci` or `npm install` |
 | `npm run check` | `npm run typecheck` then `npm test` (vitest): what CI runs | Before every commit |
+| `npm run compare` | The Polars comparison tests (`compare/`): needs Python with `compare/requirements.txt` (`PYTHON`, default `python3`); `UPDATE=1` rewrites the reference's differences | Changes to anything Polars also has |
 | `npm run build` | `dist/index.js` and its type declarations | Packaging checks |
 
 `packed.json` pins smaltdb to a commit; `scripts/fetch-packed.mjs` (identical in all smalt repositories) builds that

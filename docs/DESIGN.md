@@ -48,6 +48,11 @@ and columnar tables, in process and over the worker, and with no SQL registered.
 8. **Views:** smaltdf as a registered language that stores a view as its own serialized frame and binds it by name
    (ADR 0016 §6, owner's decision 3).
 9. **Polars comparison tests** for the functions the two share, with the differences documented.
+   Each case in `compare/cases.ts` is a smaltdf frame and a Polars expression over the same tables; `npm run compare`
+   runs both (Polars through `compare/run_polars.py`, pinned in `compare/requirements.txt`) and compares columns,
+   types, rows and errors. A case says how the two differ, or they must agree; the differences are written into the
+   reference ("Compared with Polars"), and the test fails when that section is out of date. It runs in its own CI
+   job (decision D).
 
 Types beyond the engine's current ones (`bool`, NaN as a value, dates and times, lists and structs) follow smaltdb
 ADR 0016 step 11, one type at a time. Until `bool` lands, see decision C below.

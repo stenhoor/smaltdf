@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: 'sm<span class="alt">alt</span><span class="suffix language">df</span>'
-  text: Small. Alternative. Frames.
+  text: 'Small. Alternative.<br>Frames.'
   tagline: Dataframes for smaltdb. Small and fast.
   image:
     light: /axes-mark.svg

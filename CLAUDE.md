@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This repository is `@smaltdb/df` (smaltdf): a TypeScript language for [smaltdb](https://github.com/stenhoor/smaltdb)
+This repository is `@smaltworks/smaltdf` (smaltdf): a TypeScript language for [smaltdb](https://github.com/stenhoor/smaltdb)
 with dataframe interfaces. Polars inspired its functions, but it is its own language with its own spec. Decisions are
 in [docs/DESIGN.md](docs/DESIGN.md). Several Claude Code sessions work on the smalt repos in parallel and cannot see
 each other: this file is the shared starting point, and its working rules match smaltdb's `CLAUDE.md`.

@@ -10,7 +10,7 @@ smaltdf is a language for [smaltdb](https://smaltdb.dev): you build frames in Ty
 engine. It needs smaltdb (a peer dependency) and nothing else.
 
 ```sh
-npm install smaltdb @smaltdb/df
+npm install smaltdb @smaltworks/smaltdf
 ```
 
 ## A database
@@ -21,7 +21,7 @@ write: it registers smaltdf, which it needs to read smaltdf's views.
 ```ts
 // db-worker.ts
 import { defineWorker } from 'smaltdb/worker-runtime';
-import { dfLanguage } from '@smaltdb/df';
+import { dfLanguage } from '@smaltworks/smaltdf';
 
 defineWorker({ languages: [dfLanguage] });
 ```
@@ -37,7 +37,7 @@ In Node, or in tests, the engine can run in process:
 
 ```ts
 import { Database, registerLanguage } from 'smaltdb/engine';
-import { dfLanguage } from '@smaltdb/df';
+import { dfLanguage } from '@smaltworks/smaltdf';
 
 registerLanguage(dfLanguage);
 const db = Database.openMemory();
@@ -49,7 +49,7 @@ A table can come from a frame of JavaScript data. Then `table(name)` reads it, a
 when it is collected.
 
 ```ts
-import { col, frame, len, table } from '@smaltdb/df';
+import { col, frame, len, table } from '@smaltworks/smaltdf';
 
 await frame({
   id: [1, 2, 3, 4],

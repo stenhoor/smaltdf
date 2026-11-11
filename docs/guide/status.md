@@ -31,4 +31,4 @@ structs ([ADR 0020](https://smaltdb.dev/adr/0020-lists-and-structs)): `list<…>
 and objects, the `list` and `struct` methods, `implode`, `explode` and `unnest` ([Lists and
 structs](../REFERENCE#lists-and-structs)).
 
-Then the package name (`@smaltworks/smaltdf`) and the first release, together with smaltdb 0.9.0.
+Then the first release, as `@smaltworks/smaltdf`, together with smaltdb 0.9.0.

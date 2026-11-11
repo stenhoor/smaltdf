@@ -8,7 +8,7 @@ Draft: the part of the language that steps 2–9 of [DESIGN.md](DESIGN.md) imple
 A frame describes rows with named, typed columns. Building a frame runs nothing.
 
 ```ts
-import { col, lit, table } from '@smaltdb/df';
+import { col, lit, table } from '@smaltworks/smaltdf';
 
 const big = table('orders')
   .filter(col('qty').gt(10))
@@ -124,7 +124,7 @@ them as `LIST` and `STRUCT`, and a write into one takes values of its own type o
 ## Aggregation
 
 ```ts
-import { col, len, table } from '@smaltdb/df';
+import { col, len, table } from '@smaltworks/smaltdf';
 
 table('orders').groupBy('region').agg(col('qty').sum(), col('price').mean().alias('avg_price'), len());
 table('orders').select(col('qty').sum(), col('qty').max().alias('top')); // one row
@@ -159,7 +159,7 @@ unless `maintainOrder: true`, which gives them in order of each group's first ro
 ## Joins
 
 ```ts
-import { col, concat, table } from '@smaltdb/df';
+import { col, concat, table } from '@smaltworks/smaltdf';
 
 table('orders').join(table('customers'), { on: 'cust', how: 'left' });
 table('trades').joinAsof(table('quotes'), { on: 't', by: 'sym' });
@@ -256,7 +256,7 @@ order drawn. The same `seed` draws the same rows; without one, each run draws an
 ## Data from JavaScript
 
 ```ts
-import { frame } from '@smaltdb/df';
+import { frame } from '@smaltworks/smaltdf';
 
 frame({ id: new Int32Array([1, 2, 3]), name: ['a', 'b', null], score: [1.5, 2, null] }).filter(col('score').gt(1));
 ```
@@ -271,7 +271,7 @@ arrays cross to the worker as binary data.
 ## Writing
 
 ```ts
-import { col, deleteFrom, frame, table, update } from '@smaltdb/df';
+import { col, deleteFrom, frame, table, update } from '@smaltworks/smaltdf';
 
 await frame({ id: [4, 5], name: ['cup', 'mug'] }).insertInto(db, 'items');
 await table('items').groupBy('name').agg(col('qty').sum()).createTable(db, 'totals');
@@ -301,7 +301,7 @@ in the rows `where` is true for, all rows without it; the expressions read the r
 
 ```ts
 import { registerLanguage } from 'smaltdb/engine'; // in a worker entry: defineWorker({ languages: [dfLanguage] })
-import { col, dfLanguage, refreshView, table } from '@smaltdb/df';
+import { col, dfLanguage, refreshView, table } from '@smaltworks/smaltdf';
 
 registerLanguage(dfLanguage);
 await table('orders').filter(col('qty').gt(5)).createView(db, 'big');

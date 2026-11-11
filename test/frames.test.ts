@@ -1,5 +1,5 @@
 /**
- * Core frames (DESIGN.md step 2) against REFERENCE.md: each test runs on a row table and a columnar table in
+ * Core frames (DESIGN.md step 2) against the reference (docs/reference/): each test runs on a row table and a columnar table in
  * process, and through the client and worker server. No language is registered.
  */
 import { afterEach, describe, expect, it } from 'vitest';

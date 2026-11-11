@@ -1,7 +1,7 @@
 /**
  * Polars comparison tests (DESIGN.md step 9, owner's decision D): each case in cases.ts runs as a smaltdf frame and as
  * Polars, over the same tables, and the results (columns, types, rows, or an error) are compared. A case is the same
- * unless it says how the two differ, and then it must differ. The differences are written into docs/REFERENCE.md
+ * unless it says how the two differ, and then it must differ. The differences are written into docs/guide/polars.md
  * ("Compared with Polars"): this test fails if that section is not what the cases give, and `UPDATE=1` rewrites it.
  *
  * Not part of `npm run check`: it needs Python with the Polars of compare/requirements.txt (`PYTHON`, default
@@ -23,7 +23,7 @@ interface Result {
 }
 
 const STORAGE = { int: 'INTEGER', real: 'REAL', text: 'TEXT', date: 'DATE', datetime: 'DATETIME' } as const;
-const REFERENCE = fileURLToPath(new URL('../docs/REFERENCE.md', import.meta.url));
+const REFERENCE = fileURLToPath(new URL('../docs/guide/polars.md', import.meta.url));
 const BEGIN = '<!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->';
 const END = '<!-- compare:end -->';
 
@@ -115,7 +115,7 @@ it('the reference lists the differences', () => {
   const text = readFileSync(REFERENCE, 'utf8');
   const start = text.indexOf(BEGIN);
   const end = text.indexOf(END);
-  expect(start, 'docs/REFERENCE.md has no compare section').toBeGreaterThanOrEqual(0);
+  expect(start, 'docs/guide/polars.md has no compare section').toBeGreaterThanOrEqual(0);
   const now = text.slice(start, end + END.length);
   const want = section(polars.version);
   if (process.env.UPDATE && now !== want) writeFileSync(REFERENCE, text.slice(0, start) + want + text.slice(end + END.length));

@@ -1,5 +1,5 @@
 /**
- * @smaltworks/smaltdf: a TypeScript language for smaltdb with dataframe interfaces (docs/REFERENCE.md).
+ * @smaltworks/smaltdf: a TypeScript language for smaltdb with dataframe interfaces (docs/reference/).
  *
  * smaltdf builds plans for smaltdb's engine plan layer (`smaltdb/plan`) and runs them with `queryPlan`. Nothing in
  * smaltdf generates or runs SQL.

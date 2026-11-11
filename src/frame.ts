@@ -1,5 +1,5 @@
 /**
- * Frames (REFERENCE.md "Frames"): a description of rows with named, typed columns. Building one runs nothing;
+ * Frames (docs/reference/frames/): a description of rows with named, typed columns. Building one runs nothing;
  * `plan(db)` gives the plan statement it runs as, and `collect(db)` runs it.
  */
 import * as p from 'smaltdb/plan';
@@ -189,13 +189,13 @@ export class Frame {
     return this.root.kind === 'table' ? this.root.name : this.root.kind === 'concat' ? 'concat(…)' : 'frame(…)';
   }
 
-  /** Rows turned into columns: one per value of `on`, the cells from `values` (REFERENCE.md "Reshaping"). */
+  /** Rows turned into columns: one per value of `on`, the cells from `values` (docs/reference/frames/). */
   pivot(on: string, options: PivotOptions): Frame {
     return this.withStep({ kind: 'pivot', on, options });
   }
 
   /**
-   * One row per element of list column `column`, the other columns repeated (REFERENCE.md "Lists and structs"). An empty
+   * One row per element of list column `column`, the other columns repeated (docs/reference/list/). An empty
    * list gives no row (one with null with `emptyAsNull`), a null list one row with null (none with `keepNulls: false`).
    */
   explode(column: string, options: ExplodeOptions = {}): Frame {
@@ -262,7 +262,7 @@ export class Frame {
     return new Frame(this.root, [...this.steps, step]);
   }
 
-  /** Rows of this frame matched with `other`'s by keys (REFERENCE.md "Joins"). */
+  /** Rows of this frame matched with `other`'s by keys (docs/reference/frames/). */
   join(other: Frame, options: JoinOptions = {}): Frame {
     return this.withStep({ kind: 'join', other, options });
   }

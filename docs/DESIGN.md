@@ -3,7 +3,7 @@
 Status: revised 2026-11-07. The plan layer smaltdf waited for is in smaltdb (ADR 0014's nine steps, through ADR 0015
 step 8, the public plan API), and so are ADR 0016 steps 1–10 (operations named by behaviour, meaning in the plan,
 the catalog API, typed results, order, definitions without source text, the new operations). This revision sets
-smaltdf's order of work. The language itself is specified in [REFERENCE.md](REFERENCE.md).
+smaltdf's order of work. The language itself is specified in [the reference](reference/).
 
 smaltdf is a TypeScript language for smaltdb that provides dataframe interfaces to the engine. Polars inspired its
 functions, and they are similar to Polars', but smaltdf is its own language, specified here and in its reference.
@@ -18,7 +18,7 @@ smaltui and, later, smaltnb are how people use it interactively.
 | 2 | Execution | smaltdf builds plans for the engine's plan layer ([smaltdb ADR 0014](https://github.com/stenhoor/smaltdb/blob/main/docs/adr/0014-shared-plan-layer.md), [ADR 0016](https://github.com/stenhoor/smaltdb/blob/main/docs/adr/0016-plan-api-for-every-language.md)), a layer in neutral engine terms that belongs to no language. Through it smaltdf uses the engine's optimizer, B+tree and columnar storage, fused scans, morsels and spilling. **No code in smaltdf generates, compiles to, or runs SQL** (owner's explicit directive). |
 | 3 | Placement | A client package that builds plans and sends them to the engine: in-process (`Database` from `smaltdb/engine`), over the worker protocol (`Database` from `smaltdb`), or from a plugin (`MethodContext.queryPlan`). The plan layer itself belongs in smaltdb core. |
 | 4 | Core changes | Engine features smaltdf needs belong in smaltdb core, with an ADR where the change is significant. smaltdf does not reimplement engine features. |
-| 5 | Semantics | smaltdf has its own spec ([REFERENCE.md](REFERENCE.md)). Each method maps to the engine operation that means what the spec says (`/` is `div_float`, `floorDiv` is `div_floor`, `lower` is `lower_unicode`, …); where no operation means it, one is added to the engine first. |
+| 5 | Semantics | smaltdf has its own spec ([the reference](reference/)). Each method maps to the engine operation that means what the spec says (`/` is `div_float`, `floorDiv` is `div_floor`, `lower` is `lower_unicode`, …); where no operation means it, one is added to the engine first. |
 | 6 | Testing | Tests check smaltdf against its own spec. Where a smaltdf function overlaps a Polars function, a comparison test runs both and documents the differences, so users can see them. The same query must give the same result on row and columnar storage, in process and over the worker, and with no SQL language registered. |
 | 7 | Visuals | None: smaltdf has no display. Brand assets from `stenhoor/smalt-brand` are used only for its README and docs. |
 | 8 | Frames | A frame is a description of a computation, not data: building one runs nothing. `collect(db)` builds its plan, runs it, and gives a result. `plan()` gives the plan statement itself, for `preparePlan`, a plugin, or inspection. |
@@ -50,8 +50,8 @@ and columnar tables, in process and over the worker, and with no SQL registered.
 9. **Polars comparison tests** for the functions the two share, with the differences documented.
    Each case in `compare/cases.ts` is a smaltdf frame and a Polars expression over the same tables; `npm run compare`
    runs both (Polars through `compare/run_polars.py`, pinned in `compare/requirements.txt`) and compares columns,
-   types, rows and errors. A case says how the two differ, or they must agree; the differences are written into the
-   reference ("Compared with Polars"), and the test fails when that section is out of date. It runs in its own CI
+   types, rows and errors. A case says how the two differ, or they must agree; the differences are written into
+   [Compared with Polars](guide/polars), and the test fails when that section is out of date. It runs in its own CI
    job (decision D).
 
 Types beyond the engine's first ones follow smaltdb ADR 0016 step 11, one type at a time: `bool` and NaN (ADR 0018) and

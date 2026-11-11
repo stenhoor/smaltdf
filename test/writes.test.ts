@@ -1,5 +1,5 @@
 /**
- * Writing (DESIGN.md step 7) against REFERENCE.md "Writing", on row and columnar tables in process and through the
+ * Writing (DESIGN.md step 7) against the reference (docs/reference/), on row and columnar tables in process and through the
  * worker. Every write is a plan statement; no language is registered.
  */
 import { afterEach, describe, expect, it } from 'vitest';

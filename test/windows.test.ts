@@ -1,5 +1,5 @@
 /**
- * Windows (DESIGN.md step 5) against REFERENCE.md "Windows", on row and columnar tables in process and through the
+ * Windows (DESIGN.md step 5) against the reference (docs/reference/), on row and columnar tables in process and through the
  * worker. Window results never move rows: each test reads them in the frame's own order.
  */
 import { afterEach, describe, expect, it } from 'vitest';

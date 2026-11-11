@@ -1,5 +1,5 @@
 /**
- * Joins and concatenation (DESIGN.md step 4) against REFERENCE.md "Joins", on row and columnar tables in process and
+ * Joins and concatenation (DESIGN.md step 4) against the reference (docs/reference/), on row and columnar tables in process and
  * through the worker. Join rows come in no particular order unless `maintainOrder` (decision A): those tests sort.
  */
 import { afterEach, describe, expect, it } from 'vitest';

@@ -31,7 +31,7 @@ the two share, to show users where they differ.
 ## Status
 
 In development, not published: core frames, aggregation, joins, windows, reshaping, JavaScript data, writing, views and the Polars comparison tests (steps 2–9 of [docs/DESIGN.md](docs/DESIGN.md)) are in; the order of work is in
-DESIGN.md, the language in [docs/REFERENCE.md](docs/REFERENCE.md). Tests run with no language registered (`test/boundary.test.ts`
+DESIGN.md, the language in [docs/reference/](docs/reference/). Tests run with no language registered (`test/boundary.test.ts`
 keeps `src/` on `smaltdb/plan`). An earlier
 version that compiled to SQL was merged and then removed; don't restore any of it.
 
@@ -41,7 +41,7 @@ version that compiled to SQL was merged and then removed; don't restore any of i
 |---|---|---|
 | `npm ci && npm run deps` | Installs dependencies, then the pinned smaltdb build in `packed.json` | First, and again after every `npm ci` or `npm install` |
 | `npm run check` | `npm run typecheck` then `npm test` (vitest): what CI runs | Before every commit |
-| `npm run compare` | The Polars comparison tests (`compare/`): needs Python with `compare/requirements.txt` (`PYTHON`, default `python3`); `UPDATE=1` rewrites the reference's differences | Changes to anything Polars also has |
+| `npm run compare` | The Polars comparison tests (`compare/`): needs Python with `compare/requirements.txt` (`PYTHON`, default `python3`); `UPDATE=1` rewrites the differences in `docs/guide/polars.md` | Changes to anything Polars also has |
 | `npm run build` | `dist/index.js` and its type declarations | Packaging checks |
 | `npm run docs:dev` | The docs site (VitePress, `docs/`) with live reload; `npm run docs:build` fails on dead links | Docs changes |
 
@@ -54,6 +54,15 @@ commit and installs it with `npm install --no-save`. To try an unmerged smaltdb 
 - No runtime dependencies. smaltdb is a peer dependency.
 - Engine features smaltdf needs belong in smaltdb core, with an ADR where the change is significant.
 - Don't reformat files with Prettier. Probe tests (`test/zz-*.test.ts`) are scratch files: delete them, never commit them.
+- **Docs examples are tests.** `test/docs-examples.test.ts` runs every `ts` example in `docs/guide`, `docs/reference`
+  and `docs/playground.md` as its playground runs it (`docs/.vitepress/theme/df-examples.ts`), checks the result table
+  under it, and type-checks them; `UPDATE=1 npx vitest run test/docs-examples.test.ts` writes the tables (review the
+  diff). Examples are plain JavaScript that is also TypeScript, with statements ending in `;`.
+- **The docs follow smalt-brand's documentation standard** (BRAND.md, "Documentation"): one reference page per
+  function and method, in the shape of rule 3. `docs/grammar.ebnf` has a rule per method, and `test/grammar.test.ts`
+  checks it, and each page's syntax diagram, against the source: a new method needs its rule and its page.
+- The site kit files in `docs/.vitepress/theme/` (`smaltdb.css`, `shiki.ts`, `smaltworks.ts`, `stage.ts`,
+  `playground.ts`, `railroad.ts`, `agents.ts`) are copies from smalt-brand's `themes/vitepress/`: don't edit them here.
 
 ## Working rules for sessions
 

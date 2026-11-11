@@ -1,5 +1,5 @@
 /**
- * Reshaping and data from JavaScript (DESIGN.md step 6) against REFERENCE.md "Reshaping" and "Data from JavaScript",
+ * Reshaping and data from JavaScript (DESIGN.md step 6) against the reference (docs/reference/),
  * on row and columnar tables in process and through the worker.
  */
 import { afterEach, describe, expect, it } from 'vitest';

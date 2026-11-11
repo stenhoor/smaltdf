@@ -1,5 +1,5 @@
 /**
- * Aggregation (DESIGN.md step 3) against REFERENCE.md "Aggregation", on row and columnar tables in process and
+ * Aggregation (DESIGN.md step 3) against the reference (docs/reference/), on row and columnar tables in process and
  * through the worker. Groups come in no particular order unless `maintainOrder` (decision A): those tests sort.
  */
 import { afterEach, describe, expect, it } from 'vitest';

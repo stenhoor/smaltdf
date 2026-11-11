@@ -1,0 +1,212 @@
+/* smaltdf's language, in W3C EBNF. smaltdf is TypeScript: a frame is a chain of method calls, and so is an
+   expression. This grammar names every function and method and the arguments it takes; TypeScript's own syntax (calls,
+   strings, numbers, object literals, arrays) is not repeated. The syntax diagrams on the reference pages are drawn from
+   this file, and the agent guide (/agents.md) prints it. test/grammar.test.ts checks that it names every exported
+   function and every method of Frame, GroupBy and Expr, and nothing else.
+
+   name is a column name, a string. value is a JavaScript value: a number, bigint, string, boolean, Uint8Array, Date or
+   null. expr-like is an expr or a value; a string given where an expr-like is expected is a value, not a column. */
+
+frame ::= source ('.' frame-method)*
+
+source ::= table | frame-data | concat
+
+/* Sources */
+
+table ::= 'table' '(' name ')'
+frame-data ::= 'frame' '(' '{' (name ':' column-data (',' name ':' column-data)*)? '}' ')'
+column-data ::= '[' (value (',' value)*)? ']' | typed-array
+concat ::= 'concat' '(' '[' frame (',' frame)* ']' ')'
+
+frame-method ::= select | withColumns | filter | sort | head | tail | slice | unique | sample
+               | groupBy | join | joinAsof | pivot | unpivot | explode | unnest
+
+/* Columns and rows */
+
+select ::= 'select' '(' (column (',' column)*)? ')'
+withColumns ::= 'withColumns' '(' column (',' column)* ')'
+column ::= name | expr
+filter ::= 'filter' '(' expr (',' expr)* ')'
+sort ::= 'sort' '(' (column | '[' column (',' column)* ']') (',' '{' sort-option (',' sort-option)* '}')? ')'
+sort-option ::= ('descending' | 'nullsLast') ':' (boolean | '[' boolean (',' boolean)* ']')
+head ::= 'head' '(' n? ')'
+tail ::= 'tail' '(' n? ')'
+slice ::= 'slice' '(' offset (',' n)? ')'
+unique ::= 'unique' '(' ('{' unique-option (',' unique-option)* '}')? ')'
+unique-option ::= 'subset' ':' names | 'keep' ':' ("'first'" | "'last'") | 'maintainOrder' ':' boolean
+sample ::= 'sample' '(' '{' ('n' ':' n | 'fraction' ':' number) (',' sample-option)* '}' ')'
+sample-option ::= 'withReplacement' ':' boolean | 'seed' ':' number
+names ::= name | '[' name (',' name)* ']'
+
+/* Aggregation */
+
+groupBy ::= 'groupBy' '(' column (',' column)* (',' '{' 'maintainOrder' ':' boolean '}')? ')' '.' agg
+agg ::= 'agg' '(' column (',' column)* ')'
+
+/* Joins */
+
+join ::= 'join' '(' frame (',' '{' join-option (',' join-option)* '}')? ')'
+join-option ::= 'on' ':' names | ('leftOn' | 'rightOn') ':' (column | '[' column (',' column)* ']')
+              | 'how' ':' ("'inner'" | "'left'" | "'right'" | "'full'" | "'semi'" | "'anti'" | "'cross'")
+              | 'suffix' ':' string | 'maintainOrder' ':' boolean
+joinAsof ::= 'joinAsof' '(' frame ',' '{' asof-option (',' asof-option)* '}' ')'
+asof-option ::= 'on' ':' name | ('leftOn' | 'rightOn') ':' column | 'by' ':' names
+              | 'strategy' ':' ("'backward'" | "'forward'" | "'nearest'") | 'tolerance' ':' number | 'suffix' ':' string
+
+/* Reshaping */
+
+pivot ::= 'pivot' '(' name ',' '{' pivot-option (',' pivot-option)* '}' ')'
+pivot-option ::= 'index' ':' names | 'values' ':' name
+               | 'aggregate' ':' ("'first'" | "'last'" | "'sum'" | "'mean'" | "'min'" | "'max'" | "'count'" | "'len'" | "'median'")
+               | 'columns' ':' '[' value (',' value)* ']' | 'maintainOrder' ':' boolean
+unpivot ::= 'unpivot' '(' ('{' unpivot-option (',' unpivot-option)* '}')? ')'
+unpivot-option ::= ('index' | 'on') ':' names | ('variableName' | 'valueName') ':' string
+explode ::= 'explode' '(' name (',' '{' ('emptyAsNull' | 'keepNulls') ':' boolean (',' ('emptyAsNull' | 'keepNulls') ':' boolean)? '}')? ')'
+unnest ::= 'unnest' '(' name ')'
+
+/* Running a frame */
+
+collect ::= frame '.' 'collect' '(' db ')'
+plan ::= frame '.' 'plan' '(' db ')'
+
+/* Writing and views */
+
+insertInto ::= frame '.' 'insertInto' '(' db ',' name (',' '{' 'onConflict' ':' on-conflict '}')? ')'
+createTable ::= frame '.' 'createTable' '(' db ',' name (',' '{' create-option (',' create-option)* '}')? ')'
+create-option ::= 'storage' ':' ("'row'" | "'columnar'") | 'ifNotExists' ':' boolean
+update ::= 'update' '(' name ',' '{' 'set' ':' '{' name ':' expr-like (',' name ':' expr-like)* '}' (',' 'where' ':' expr)? (',' 'onConflict' ':' on-conflict)? '}' ')' '.' 'run' '(' db ')'
+deleteFrom ::= 'deleteFrom' '(' name (',' '{' 'where' ':' expr '}')? ')' '.' 'run' '(' db ')'
+on-conflict ::= "'abort'" | "'ignore'" | "'replace'"
+createView ::= frame '.' 'createView' '(' db ',' name (',' '{' view-option (',' view-option)* '}')? ')'
+view-option ::= 'materialized' ':' boolean | 'ifNotExists' ':' boolean
+refreshView ::= 'refreshView' '(' db ',' name ')'
+
+/* Expressions */
+
+expr ::= (col | lit | len) ('.' expr-method)*
+
+col ::= 'col' '(' name ')'
+lit ::= 'lit' '(' value ')'
+len ::= 'len' '(' ')'
+
+expr-method ::= arithmetic | comparison | logic | null-test | alias | cast | round
+              | aggregate | window-function | over | 'str' '.' str-method | 'dt' '.' dt-method
+              | 'list' '.' list-method | 'struct' '.' struct-field
+
+arithmetic ::= add | sub | mul | div | floorDiv | mod
+add ::= 'add' '(' expr-like ')'
+sub ::= 'sub' '(' expr-like ')'
+mul ::= 'mul' '(' expr-like ')'
+div ::= 'div' '(' expr-like ')'
+floorDiv ::= 'floorDiv' '(' expr-like ')'
+mod ::= 'mod' '(' expr-like ')'
+
+comparison ::= eq | ne | lt | le | gt | ge | eqMissing
+eq ::= 'eq' '(' expr-like ')'
+ne ::= 'ne' '(' expr-like ')'
+lt ::= 'lt' '(' expr-like ')'
+le ::= 'le' '(' expr-like ')'
+gt ::= 'gt' '(' expr-like ')'
+ge ::= 'ge' '(' expr-like ')'
+eqMissing ::= 'eqMissing' '(' expr-like ')'
+
+logic ::= and | or | not
+and ::= 'and' '(' expr-like ')'
+or ::= 'or' '(' expr-like ')'
+not ::= 'not' '(' ')'
+
+null-test ::= isNull | isNotNull
+isNull ::= 'isNull' '(' ')'
+isNotNull ::= 'isNotNull' '(' ')'
+
+alias ::= 'alias' '(' name ')'
+cast ::= 'cast' '(' ("'int'" | "'real'" | "'text'" | "'blob'" | "'date'" | "'datetime'") ')'
+round ::= 'round' '(' digits? ')'
+
+/* Aggregates */
+
+aggregate ::= sum | mean | min | max | count | first | last | median | std | var | implode
+sum ::= 'sum' '(' ')'
+mean ::= 'mean' '(' ')'
+min ::= 'min' '(' ')'
+max ::= 'max' '(' ')'
+count ::= 'count' '(' ')'
+first ::= 'first' '(' ')'
+last ::= 'last' '(' ')'
+median ::= 'median' '(' ')'
+std ::= 'std' '(' ')'
+var ::= 'var' '(' ')'
+implode ::= 'implode' '(' ')'
+
+/* Windows */
+
+window-function ::= cumSum | cumMin | cumMax | cumCount | shift | rank
+cumSum ::= 'cumSum' '(' ')'
+cumMin ::= 'cumMin' '(' ')'
+cumMax ::= 'cumMax' '(' ')'
+cumCount ::= 'cumCount' '(' ')'
+shift ::= 'shift' '(' (n (',' expr-like)?)? ')'
+rank ::= 'rank' '(' ('{' rank-option (',' rank-option)* '}')? ')'
+rank-option ::= 'method' ':' ("'min'" | "'dense'" | "'ordinal'") | 'descending' ':' boolean
+over ::= 'over' '(' (column | '[' (column (',' column)*)? ']')? (',' '{' over-option (',' over-option)* '}')? ')'
+over-option ::= 'orderBy' ':' (column | '[' column (',' column)* ']') | 'descending' ':' (boolean | '[' boolean (',' boolean)* ']')
+
+/* Text */
+
+str-method ::= str-lower | str-upper | str-contains | str-toDate | str-toDatetime
+str-lower ::= 'lower' '(' ')'
+str-upper ::= 'upper' '(' ')'
+str-contains ::= 'contains' '(' pattern ')'
+str-toDate ::= 'toDate' '(' format? ')'
+str-toDatetime ::= 'toDatetime' '(' format? ')'
+
+/* Dates and times */
+
+dt-method ::= dt-year | dt-month | dt-day | dt-weekday | dt-ordinalDay | dt-hour | dt-minute | dt-second
+            | dt-microsecond | dt-date | dt-truncate | dt-offsetBy | dt-strftime | dt-toZone | dt-fromZone | dt-zoneOffset
+dt-year ::= 'year' '(' ')'
+dt-month ::= 'month' '(' ')'
+dt-day ::= 'day' '(' ')'
+dt-weekday ::= 'weekday' '(' ')'
+dt-ordinalDay ::= 'ordinalDay' '(' ')'
+dt-hour ::= 'hour' '(' ')'
+dt-minute ::= 'minute' '(' ')'
+dt-second ::= 'second' '(' ')'
+dt-microsecond ::= 'microsecond' '(' ')'
+dt-date ::= 'date' '(' ')'
+dt-truncate ::= 'truncate' '(' every ')'
+dt-offsetBy ::= 'offsetBy' '(' (every | expr) ')'
+dt-strftime ::= 'strftime' '(' format ')'
+dt-toZone ::= 'toZone' '(' zone ')'
+dt-fromZone ::= 'fromZone' '(' zone (',' '{' 'ambiguous' ':' ("'earliest'" | "'latest'" | "'raise'") '}')? ')'
+dt-zoneOffset ::= 'zoneOffset' '(' zone ')'
+every ::= string
+zone ::= expr-like
+
+/* Lists and structs */
+
+list-method ::= list-len | list-get | list-first | list-last | list-contains | list-slice | list-head | list-tail
+              | list-concat | list-join | list-sort | list-unique | list-reverse | list-sum | list-mean | list-min
+              | list-max
+list-len ::= 'len' '(' ')'
+list-get ::= 'get' '(' expr-like ')'
+list-first ::= 'first' '(' ')'
+list-last ::= 'last' '(' ')'
+list-contains ::= 'contains' '(' expr-like ')'
+list-slice ::= 'slice' '(' expr-like (',' expr-like)? ')'
+list-head ::= 'head' '(' n? ')'
+list-tail ::= 'tail' '(' n? ')'
+list-concat ::= 'concat' '(' expr-like ')'
+list-join ::= 'join' '(' string ')'
+list-sort ::= 'sort' '(' ('{' 'descending' ':' boolean '}')? ')'
+list-unique ::= 'unique' '(' ')'
+list-reverse ::= 'reverse' '(' ')'
+list-sum ::= 'sum' '(' ')'
+list-mean ::= 'mean' '(' ')'
+list-min ::= 'min' '(' ')'
+list-max ::= 'max' '(' ')'
+struct-field ::= 'field' '(' name ')'
+
+/* Registering smaltdf where the engine runs, so it reads smaltdf's views */
+
+dfLanguage ::= 'registerLanguage' '(' 'dfLanguage' ')' | 'defineWorker' '(' '{' 'languages' ':' '[' 'dfLanguage' (',' language)* ']' '}' ')'

@@ -1,0 +1,57 @@
+# Lists and structs
+
+Two kinds of types hold values of other types: `list<T>`, a list of `T` values, and `struct<name T, …>`, named fields,
+nested to any depth. `frame(…)` reads a column of JS arrays as a list and of plain objects as a struct, and `collect`
+gives them back as arrays and objects. The methods of `expr.list` work on lists, and `expr.struct.field` reads a field.
+
+```ts
+import { col } from '@smaltworks/smaltdf';
+```
+
+## Methods {#methods}
+
+### Size and elements
+
+- [`list.len`](./len): The number of elements, nulls included.
+- [`list.get`](./get): The element at a position, or null out of range.
+- [`list.first`](./first): The first element, or null for an empty list.
+- [`list.last`](./last): The last element, or null for an empty list.
+- [`list.contains`](./contains): Whether an element equals a value.
+
+### Parts
+
+- [`list.slice`](./slice): The elements from a position, `length` of them or all the rest.
+- [`list.head`](./head): The first `n` elements.
+- [`list.tail`](./tail): The last `n` elements.
+- [`list.concat`](./concat): The list's elements, then another's.
+
+### Order and repeats
+
+- [`list.sort`](./sort): The elements sorted, nulls first.
+- [`list.unique`](./unique): The elements without repeats: the first of each, in order.
+- [`list.reverse`](./reverse): The elements in reverse order.
+
+### Numbers
+
+- [`list.sum`](./sum): The sum of the non-null elements; 0 for none.
+- [`list.mean`](./mean): The mean of the non-null elements; null for none.
+- [`list.min`](./min): The smallest non-null element; null for none.
+- [`list.max`](./max): The largest non-null element; null for none.
+
+### Text
+
+- [`list.join`](./join): A list of text's non-null elements, joined by a separator.
+
+### Structs
+
+- [`struct.field`](./field): A struct's field, by name.
+
+## Rules they share
+
+- **Lists only:** each `list` method takes a `list<…>`; anything else is an error when the plan is built
+  (`SMALTDF_TYPE`, `list.len: takes a list, not int`).
+- **Nulls:** a null list gives null. Null elements are elements: they count in `len` and sort first in `sort`; the
+  numeric methods (`sum`, `mean`, `min`, `max`) skip them.
+- **Positions** count from 0; a negative position counts from the end, `-1` the last element.
+- **Rows:** [`explode`](../frames/explode) makes a row per element, [`implode`](../aggregates/implode) a list per
+  group, and [`unnest`](../frames/unnest) a column per field.

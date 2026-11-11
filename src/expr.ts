@@ -1,5 +1,5 @@
 /**
- * Expressions (REFERENCE.md "Expressions"): a description of a value per row, resolved against a frame's columns when
+ * Expressions (docs/reference/expressions/): a description of a value per row, resolved against a frame's columns when
  * its plan is built. Each method maps to the engine operation that means what smaltdf's reference says.
  */
 import * as p from 'smaltdb/plan';
@@ -20,7 +20,7 @@ type Node =
   | WinNode
   | OverNode;
 
-/** Window functions (REFERENCE.md "Windows"): over the frame's rows in order, or a partition's. */
+/** Window functions (docs/reference/windows/): over the frame's rows in order, or a partition's. */
 export type WinFn = 'cumSum' | 'cumMin' | 'cumMax' | 'cumCount' | 'shift' | 'rank';
 
 export type RankMethod = 'min' | 'dense' | 'ordinal';
@@ -45,7 +45,7 @@ export interface OverNode {
   readonly descending: readonly boolean[];
 }
 
-/** The aggregates (REFERENCE.md "Aggregation"). */
+/** The aggregates (docs/reference/aggregates/). */
 export type AggFn = 'sum' | 'mean' | 'min' | 'max' | 'count' | 'len' | 'first' | 'last' | 'median' | 'std' | 'var' | 'implode';
 
 /** @internal An aggregate of `arg` (none for `len`). */
@@ -181,7 +181,7 @@ export class Expr {
     };
   }
 
-  /** List methods (REFERENCE.md "Lists and structs"). */
+  /** List methods (docs/reference/list/). */
   get list(): ListMethods {
     const m = (name: string, ...args: ExprLike[]) => this.op(`list.${name}`, ...args);
     return {
@@ -210,7 +210,7 @@ export class Expr {
     return { field: (name: string) => this.op('struct.field', name) };
   }
 
-  /** Date and time methods (REFERENCE.md "Dates and times"). */
+  /** Date and time methods (docs/reference/dt/). */
   get dt(): DtMethods {
     const part = (name: string) => () => this.op(`dt.${name}`);
     return {

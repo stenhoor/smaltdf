@@ -1,7 +1,7 @@
 /**
  * The comparison cases: each runs a smaltdf frame and a Polars expression of the same function over the same tables.
  * A case is the same unless it says how the two differ (`differs`); compare.test.ts checks both ways, and writes the
- * differences into docs/REFERENCE.md ("Compared with Polars").
+ * differences into docs/guide/polars.md.
  */
 import { col, concat, frame, len, lit, table, type Frame } from '../src/index.js';
 

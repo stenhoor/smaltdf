@@ -1,5 +1,5 @@
 /**
- * Writing (REFERENCE.md "Writing"): a frame's rows into a table or a new table, and changes to a table's rows. Each
+ * Writing (docs/reference/writing/): a frame's rows into a table or a new table, and changes to a table's rows. Each
  * is a plan statement; a new table and its rows are written in one transaction.
  */
 import * as p from 'smaltdb/plan';

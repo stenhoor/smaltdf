@@ -1,5 +1,5 @@
 /**
- * Views (DESIGN.md step 8) against REFERENCE.md "Views", on row and columnar tables in process and through the
+ * Views (DESIGN.md step 8) against the reference (docs/reference/), on row and columnar tables in process and through the
  * worker. smaltdf's views are its own serialized frames, bound by `dfLanguage` where a plan reads them: the tests
  * register it, as an application does where the engine runs. No SQL is registered.
  */

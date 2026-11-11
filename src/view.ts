@@ -1,5 +1,5 @@
 /**
- * Views (REFERENCE.md "Views"): a frame stored by name, as smaltdf's own serialized frame (smaltdb ADR 0016 section 6,
+ * Views (docs/reference/writing/): a frame stored by name, as smaltdf's own serialized frame (smaltdb ADR 0016 section 6,
  * owner's decision 3), and bound where a plan reads it by `dfLanguage`, which the engine's process registers.
  */
 import type { BindContext, ObjectReference, SmaltLanguage } from 'smaltdb/language';

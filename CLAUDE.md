@@ -45,6 +45,10 @@ version that compiled to SQL was merged and then removed; don't restore any of i
 | `npm run build` | `dist/index.js` and its type declarations | Packaging checks |
 | `npm run docs:dev` | The docs site (VitePress, `docs/`) with live reload; `npm run docs:build` fails on dead links | Docs changes |
 
+Type checking (`npm run typecheck`, and the docs examples' check in `test/docs-examples.test.ts`) runs on TypeScript 7:
+`typescript7`, an npm alias, run as `node node_modules/typescript7/bin/tsc`. The declarations `npm run build` emits stay
+on TypeScript 6.0.3 (`typescript`, so `npx tsc` is 6.0.3) for one more release (smaltty ADR 0030).
+
 `packed.json` pins smaltdb to a commit; `scripts/fetch-packed.mjs` (identical in all smalt repositories) builds that
 commit and installs it with `npm install --no-save`. To try an unmerged smaltdb change, run
 `node scripts/fetch-packed.mjs --local smaltdb=../smaltdb`.

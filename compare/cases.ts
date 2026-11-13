@@ -3,7 +3,7 @@
  * A case is the same unless it says how the two differ (`differs`); compare.test.ts checks both ways, and writes the
  * differences into docs/guide/polars.md.
  */
-import { col, concat, element, frame, len, lit, table, type Frame } from '../src/index.js';
+import { col, concat, concatList, element, frame, len, lit, struct, table, type Frame } from '../src/index.js';
 
 /** A table as both sides make it: columns typed `int`, `real`, `text`, `date` or `datetime` (as result text). */
 export interface CompareTable {
@@ -181,6 +181,13 @@ export const CASES: readonly Case[] = [
   { id: 'list-filter', fn: 'list.filter', df: lists().select(col('v').list.filter(element().gt(1))), polars: `${LISTS}.select(pl.col('v').list.filter(pl.element() > 1))` },
   { id: 'list-agg', fn: 'list.agg', df: lists().select(col('v').list.agg(element().sum()), col('v').list.agg(element().max().sub(element().min())).alias('range'), col('v').list.agg(element().sum().div(len())).alias('per')), polars: `${LISTS}.select(pl.col('v').list.agg(pl.element().sum()), pl.col('v').list.agg(pl.element().max() - pl.element().min()).alias('range'), pl.col('v').list.agg(pl.element().sum() / pl.element().len()).alias('per'))` },
   { id: 'list-eval-row', fn: 'element', df: lists().select(col('v').list.eval(element().add(col('id')))), polars: `${LISTS}.select(pl.col('v').list.eval(pl.element() + pl.col('id')))`, differs: 'A body may read the row\'s columns (`col`); Polars refuses named columns in `eval`.' },
+  { id: 'struct', fn: 'struct', df: lists().select(struct({ id: col('id'), first: col('v').list.first() }).alias('s')), polars: `${LISTS}.select(pl.struct(pl.col('id'), pl.col('v').list.first().alias('first')).alias('s'))` },
+  { id: 'concat-list', fn: 'concatList', df: lists().select(concatList(col('id'), col('v'), lit(9)).alias('c')), polars: `${LISTS}.select(pl.concat_list(pl.col('id'), pl.col('v'), pl.lit(9)).alias('c'))` },
+  { id: 'struct-with-fields', fn: 'struct.withFields', df: lists().select(col('pt').struct.withFields({ z: col('id'), x: lit(0) })), polars: `${LISTS}.select(pl.col('pt').struct.with_fields(z=pl.col('id'), x=pl.lit(0)))` },
+  { id: 'struct-rename', fn: 'struct.renameFields', df: lists().select(col('pt').struct.renameFields(['a', 'b'])), polars: `${LISTS}.select(pl.col('pt').struct.rename_fields(['a', 'b']))` },
+  { id: 'struct-drop-select', fn: 'struct.drop', df: lists().select(col('pt').struct.drop('x').alias('d'), col('pt').struct.select('y', 'x').alias('s')), polars: `${LISTS}.select(pl.col('pt').struct.drop(['x']).alias('d'), pl.col('pt').struct.eval(pl.field('y'), pl.field('x')).alias('s'))` },
+  { id: 'struct-json', fn: 'struct.jsonEncode', df: lists().select(col('pt').struct.jsonEncode()), polars: `${LISTS}.select(pl.col('pt').struct.json_encode())`, differs: 'A null struct gives null, not the text `null`; a whole `real` is written without `.0` (`0`, not `0.0`).' },
+  { id: 'list-to-struct', fn: 'list.toStruct', df: lists().select(col('v').list.toStruct(['a', 'b'])), polars: `${LISTS}.select(pl.col('v').list.to_struct(fields=['a', 'b']))` },
   { id: 'explode', fn: 'explode', df: lists().select('id', 't').explode('t'), polars: `${LISTS}.select('id', 't').explode('t')` },
   { id: 'explode-zip', fn: 'explode', df: frame({ id: [1, 2, 3, 4], a: [[1, 2], [], null, [3]], b: [['x', 'y'], [], null, ['z']] }).explode(['a', 'b']), polars: "pl.DataFrame({'id': [1, 2, 3, 4], 'a': [[1, 2], [], None, [3]], 'b': [['x', 'y'], [], None, ['z']]}).explode(['a', 'b'])" },
   { id: 'explode-zip-lengths', fn: 'explode', df: frame({ id: [1], a: [[1, 2]], b: [['x']] }).explode(['a', 'b']), polars: "pl.DataFrame({'id': [1], 'a': [[1, 2]], 'b': [['x']]}).explode(['a', 'b'])" },

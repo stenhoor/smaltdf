@@ -30,7 +30,7 @@ function languageRules(): string[] {
     else out.add(n);
   }
   // Exported functions and values; `frame` is the rule `frame-data` (the rule `frame` is a whole chain).
-  const fns: Record<string, string> = { table: 'table', frame: 'frame-data', concat: 'concat', col: 'col', lit: 'lit', len: 'len', element: 'element', update: 'update', deleteFrom: 'deleteFrom', refreshView: 'refreshView', dfLanguage: 'dfLanguage' };
+  const fns: Record<string, string> = { table: 'table', frame: 'frame-data', concat: 'concat', col: 'col', lit: 'lit', len: 'len', element: 'element', struct: 'struct', concatList: 'concatList', update: 'update', deleteFrom: 'deleteFrom', refreshView: 'refreshView', dfLanguage: 'dfLanguage' };
   for (const name of Object.keys(df)) {
     if (['Frame', 'GroupBy', 'Expr', 'Write', 'DfError'].includes(name)) continue;
     expect(fns[name], `export ${name} has no grammar rule name here`).toBeDefined();

@@ -3,7 +3,7 @@
  * methods, implode, explode, unnest, and writes. In process and through the worker.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { col, element, frame, len, lit, table } from '../src/index.js';
+import { col, concatList, element, frame, len, lit, struct, table } from '../src/index.js';
 import { KINDS, makeDb } from './helpers/db.js';
 
 const closers: (() => Promise<void>)[] = [];
@@ -142,6 +142,29 @@ describe.each(KINDS)('%s', (kind) => {
     await expect(posts().explode(['tags', 'tags']).collect(db)).rejects.toThrow(/explode: a column is named twice/);
     await expect(posts().explode(['tags', 'id']).collect(db)).rejects.toThrow(/explode: id is int, not a list/);
     expect(() => posts().explode([])).toThrow(/explode: name at least one column/);
+  });
+
+  it('building structs and lists, and changing structs: types, nulls and errors', async () => {
+    const db = await open();
+    const r = await posts()
+      .select(struct({ id: col('id'), n: col('scores').list.len() }).alias('s'), concatList(col('id'), col('scores')).alias('c'), col('pt').struct.select('y').alias('y'), col('scores').list.toStruct(['a']).alias('t'))
+      .collect(db);
+    expect(r.types).toEqual(['struct<id int, n int>', 'list<int>', 'struct<y real>', 'struct<a int>']);
+    expect(r.rows).toEqual([
+      [{ id: 1, n: 3 }, [1, 3, 1, 2], { y: 2.5 }, { a: 3 }],
+      [{ id: 2, n: 0 }, [2], { y: null }, { a: null }],
+      [{ id: 3, n: null }, null, null, null],
+      [{ id: 4, n: 3 }, [4, 5, null, 5], { y: 0 }, { a: 5 }],
+    ]);
+    const fails = async (e: ReturnType<typeof col>, pattern: RegExp) => expect(posts().select(e).collect(db)).rejects.toThrow(pattern);
+    await fails(col('pt').struct.drop('x', 'y'), /struct\.drop: leaves no field/);
+    await fails(col('pt').struct.drop('z'), /struct\.drop: struct<x int, y real> has no field "z"/);
+    await fails(col('pt').struct.renameFields(['a']), /struct\.renameFields: takes 2 names for struct<x int, y real>, not 1/);
+    await fails(col('id').struct.jsonEncode(), /struct\.jsonEncode: takes a struct/);
+    await fails(concatList(col('id'), col('tags')), /concatList: joins values and lists of one element type/);
+    expect(() => struct({ 'a b': 1 })).toThrow(/struct: a field name is letters, digits and _, not "a b"/);
+    expect(() => struct({})).toThrow(/struct: expected one field or more/);
+    expect(() => concatList()).toThrow(/concatList: expected one value or more/);
   });
 
   it('a table keeps them: LIST and STRUCT storage', async () => {

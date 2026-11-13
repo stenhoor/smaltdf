@@ -17,6 +17,7 @@ type Node =
   | { readonly k: 'cast'; readonly to: CastType; readonly arg: Node }
   | { readonly k: 'alias'; readonly name: string; readonly arg: Node }
   | ElementNode
+  | { readonly k: 'struct'; readonly names: readonly string[]; readonly args: readonly Node[] }
   | AggNode
   | WinNode
   | OverNode;
@@ -251,6 +252,11 @@ export class Expr {
       setIntersection: (other: ExprLike) => m('setIntersection', other),
       setDifference: (other: ExprLike) => m('setDifference', other),
       setSymmetricDifference: (other: ExprLike) => m('setSymmetricDifference', other),
+      toStruct: (fields: readonly string[]) => {
+        if (!Array.isArray(fields) || fields.length === 0) throw new DfError('SMALTDF_TYPE', 'list.toStruct: expected one field name or more');
+        for (const f of fields) checkFieldName('list.toStruct', f);
+        return m('toStruct', ...fields);
+      },
       eval: (expr: Expr) => m('eval', body('eval', expr)),
       filter: (predicate: Expr) => m('filter', body('filter', predicate)),
       agg: (expr: Expr) => m('agg', body('agg', expr)),
@@ -258,8 +264,22 @@ export class Expr {
   }
 
   /** Struct methods. */
-  get struct(): { field(name: string): Expr } {
-    return { field: (name: string) => this.op('struct.field', name) };
+  get struct(): StructMethods {
+    const names = (method: string, xs: readonly string[]): readonly string[] => {
+      for (const n of xs) if (typeof n !== 'string') throw new DfError('SMALTDF_TYPE', `struct.${method}: expected field names`);
+      return xs;
+    };
+    return {
+      field: (name: string) => this.op('struct.field', name),
+      withFields: (fields: Readonly<Record<string, ExprLike>>) => {
+        const [ns, args] = fieldsOf('struct.withFields', fields);
+        return new Expr({ k: 'op', method: 'struct.withFields', args: [this.node, { k: 'struct', names: ns, args }] });
+      },
+      renameFields: (to: readonly string[]) => this.op('struct.renameFields', ...names('renameFields', to)),
+      drop: (...fields: string[]) => this.op('struct.drop', ...names('drop', fields)),
+      select: (...fields: string[]) => this.op('struct.select', ...names('select', fields)),
+      jsonEncode: () => this.op('struct.jsonEncode'),
+    };
   }
 
   /** Date and time methods (docs/reference/dt/). */
@@ -355,12 +375,30 @@ export interface ListMethods {
   setDifference(other: ExprLike): Expr;
   /** The elements of one list but not both, each once: this list's, then `other`'s. */
   setSymmetricDifference(other: ExprLike): Expr;
+  /** A struct of the elements, by position, named `fields`: a missing element is null. */
+  toStruct(fields: readonly string[]): Expr;
   /** The list of `expr` for each element: `element()` is the element, and `col` reads the row. */
   eval(expr: Expr): Expr;
   /** The elements for which `predicate` is true, in order. */
   filter(predicate: Expr): Expr;
   /** `expr` over aggregates of the elements: `list.agg(element().sum().div(len()))`. */
   agg(expr: Expr): Expr;
+}
+
+/** The `struct` methods of an expression of structs. */
+export interface StructMethods {
+  /** A field, by name. */
+  field(name: string): Expr;
+  /** The struct with fields added, or replaced where a name is taken: `{ name: expr }`, in order. */
+  withFields(fields: Readonly<Record<string, ExprLike>>): Expr;
+  /** The same values under new field names, one per field, in order. */
+  renameFields(names: readonly string[]): Expr;
+  /** The struct without these fields. */
+  drop(...fields: string[]): Expr;
+  /** A struct of these fields, in this order. */
+  select(...fields: string[]): Expr;
+  /** The struct as JSON text: `{"x":1,"y":2.5}`. */
+  jsonEncode(): Expr;
 }
 
 /** The `dt` methods of an expression of dates and times. */
@@ -397,6 +435,34 @@ export interface DtMethods {
 
 /** A column of the frame, by name. */
 export const col = (name: string): Expr => new Expr({ k: 'col', name });
+
+/** Field names for a struct type: letters, digits and `_`, not starting with a digit, each once. */
+function checkFieldName(method: string, name: string): void {
+  if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new DfError('SMALTDF_RANGE', `${method}: a field name is letters, digits and _, not ${JSON.stringify(name)}`);
+}
+
+function fieldsOf(method: string, fields: Readonly<Record<string, ExprLike>>): [string[], Node[]] {
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields) || fields instanceof Expr) throw new DfError('SMALTDF_TYPE', `${method}: expected { name: expr, … }`);
+  const names = Object.keys(fields);
+  if (names.length === 0) throw new DfError('SMALTDF_TYPE', `${method}: expected one field or more`);
+  for (const n of names) checkFieldName(method, n);
+  return [names, names.map((n) => node(fields[n] as ExprLike))];
+}
+
+/** A struct of named values: `struct({ x: col('a'), y: 1 })`. */
+export const struct = (fields: Readonly<Record<string, ExprLike>>): Expr => {
+  const [names, args] = fieldsOf('struct', fields);
+  return new Expr({ k: 'struct', names, args });
+};
+
+/**
+ * One list of the values, in order: a list's elements are each added, a single value is added as one element. The
+ * lists and values must be of one element type; a null list gives null.
+ */
+export const concatList = (...values: ExprLike[]): Expr => {
+  if (values.length === 0) throw new DfError('SMALTDF_TYPE', 'concatList: expected one value or more');
+  return new Expr({ k: 'op', method: 'concatList', args: values.map(node) });
+};
 
 /**
  * The element of the list a `list.eval`, `list.filter` or `list.agg` body runs over; `depth` reaches the lists around
@@ -517,6 +583,10 @@ function resolveNode(n: Node, scope: Scope): Resolved {
     }
     case 'op':
       return EACH.has(n.method) ? resolveEach(n, scope) : resolveOp(n, scope);
+    case 'struct': {
+      const vals = n.args.map((x) => resolveNode(x, scope));
+      return { plan: structOf(n.names, vals), type: structType(n.names, vals.map((v) => v.type)), name: 'struct' };
+    }
     case 'element': {
       const frames = scope.elements ?? [];
       const f = frames[frames.length - 1 - n.depth];
@@ -544,6 +614,8 @@ export function hasAggregate(e: Expr | string): boolean {
       case 'op':
         // A list.eval, list.filter or list.agg body's aggregates are over the list's elements, not the frame's rows.
         return EACH.has(n.method) ? walk(n.args[0]!) : n.args.some(walk);
+      case 'struct':
+        return n.args.some(walk);
       case 'cast':
       case 'alias':
         return walk(n.arg);
@@ -561,6 +633,7 @@ export function readsColumns(e: Expr | string): boolean {
       case 'col':
         return true;
       case 'op':
+      case 'struct':
         return n.args.some(walk);
       case 'cast':
       case 'alias':
@@ -656,6 +729,11 @@ function resolveEach(n: Node & { k: 'op' }, scope: Scope): Resolved {
   return { plan: withOrigin(plan, origin), type: t, name: a.name };
 }
 
+const structType = (names: readonly string[], types: readonly DfType[]): DfType => `struct<${names.map((n, i) => `${n} ${types[i] === 'null' ? 'any' : types[i]}`).join(', ')}>` as DfType;
+const structOf = (names: readonly string[], vals: readonly Resolved[]): PlanExpr => p.call('struct_of', vals.map((v) => v.plan), planType(structType(names, vals.map((v) => v.type))));
+/** `whole`, or null where `of` is null: a struct built from another's fields is null where that one is. */
+const nullWhereNull = (of: PlanExpr, whole: PlanExpr, type: DfType): PlanExpr => p.caseWhen([{ when: p.isNull(of), then: p.lit(null) }], planType(type), whole);
+
 function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
   const args = n.args.map((a) => resolveNode(a, scope));
   const [a, b] = args as [Resolved, Resolved | undefined];
@@ -742,6 +820,66 @@ function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {
       if (i < 0) throw new DfError('SMALTDF_SCHEMA', `${scope.step}: struct.field: ${a.type} has no field "${name}" (fields: ${fields!.map((f) => f.name).join(', ')})`);
       const t = fields![i]!.type;
       return { ...out(p.call('struct_field', [a.plan, p.lit(i, 'int')], planType(t)), t), name };
+    }
+    case 'struct.withFields':
+    case 'struct.renameFields':
+    case 'struct.drop':
+    case 'struct.select':
+    case 'struct.jsonEncode': {
+      const fields = structFields(a.type);
+      need(fields !== undefined, 'takes a struct');
+      const read = (i: number): Resolved => ({ plan: p.call('struct_field', [a.plan, p.lit(i, 'int')], planType(fields![i]!.type)), type: fields![i]!.type, name: fields![i]!.name });
+      const index = (name: string): number => {
+        const i = fields!.findIndex((f) => f.name === name);
+        if (i < 0) throw new DfError('SMALTDF_SCHEMA', `${scope.step}: ${m}: ${a.type} has no field "${name}" (fields: ${fields!.map((f) => f.name).join(', ')})`);
+        return i;
+      };
+      const rest = args.slice(1).map((x) => String(x.plan.k === 'lit' ? x.plan.value : ''));
+      if (m === 'struct.jsonEncode') return out(p.cast('cast_text', a.plan, 'text'), 'text');
+      let names: string[];
+      let vals: Resolved[];
+      if (m === 'struct.withFields') {
+        const add = n.args[1] as Node & { k: 'struct' };
+        const extra = add.args.map((x) => resolveNode(x, scope));
+        names = fields!.map((f) => f.name);
+        vals = fields!.map((_f, i) => read(i));
+        add.names.forEach((nm, j) => {
+          const at = names.indexOf(nm);
+          if (at >= 0) vals[at] = extra[j]!;
+          else {
+            names.push(nm);
+            vals.push(extra[j]!);
+          }
+        });
+      } else if (m === 'struct.renameFields') {
+        if (rest.length !== fields!.length) throw typeError(scope, m, `takes ${fields!.length} names for ${a.type}, not ${rest.length}`);
+        rest.forEach((nm) => checkFieldName(m, nm));
+        if (new Set(rest).size !== rest.length) throw typeError(scope, m, 'takes each name once');
+        names = rest;
+        vals = fields!.map((_f, i) => read(i));
+      } else if (m === 'struct.drop') {
+        const gone = new Set(rest.map(index));
+        names = fields!.filter((_f, i) => !gone.has(i)).map((f) => f.name);
+        if (names.length === 0) throw typeError(scope, m, 'leaves no field');
+        vals = fields!.flatMap((_f, i) => (gone.has(i) ? [] : [read(i)]));
+      } else {
+        if (rest.length === 0 || new Set(rest).size !== rest.length) throw typeError(scope, m, 'takes one field name or more, each once');
+        names = rest;
+        vals = rest.map((nm) => read(index(nm)));
+      }
+      const t = structType(names, vals.map((v) => v.type));
+      return out(nullWhereNull(a.plan, structOf(names, vals), t), t);
+    }
+    case 'concatList': {
+      // Each list's elements, each single value as one element: one list of one element type.
+      const elems = args.map((x) => listElement(x.type) ?? x.type);
+      const known = elems.filter((t) => t !== 'null' && t !== 'any');
+      need(known.every((t) => comparable(t, known[0]!)), 'joins values and lists of one element type');
+      const el: DfType = known.length === 0 ? 'any' : known.every((t) => t === known[0]) ? known[0]! : isNumeric(known[0]!) ? 'num' : 'any';
+      const lt = `list<${el}>` as DfType;
+      const asList = (x: Resolved): PlanExpr => (listElement(x.type) !== undefined ? x.plan : p.call('list_of', [x.plan], planType(lt)));
+      const plan = args.slice(1).reduce((acc, x) => p.call('list_concat', [acc, asList(x)], planType(lt)), asList(a));
+      return out(plan, lt);
     }
     default:
       if (m.startsWith('list.')) return resolveList(m.slice(5), args, scope, out, need);
@@ -830,6 +968,13 @@ function resolveList(
     }
     case 'gatherEvery':
       return call('list_gather_every', a.type);
+    case 'toStruct': {
+      const names = args.slice(1).map((x) => String(x.plan.k === 'lit' ? x.plan.value : ''));
+      if (new Set(names).size !== names.length) throw typeError(scope, 'list.toStruct', 'takes each name once');
+      const vals: Resolved[] = names.map((nm, i) => ({ plan: p.call('list_get', [a.plan, p.lit(i, 'int')], planType(elem)), type: elem, name: nm }));
+      const t = structType(names, vals.map((v) => v.type));
+      return out(nullWhereNull(a.plan, structOf(names, vals), t), t);
+    }
     case 'sample':
       return call('list_sample', a.type);
     case 'item':

@@ -25,6 +25,7 @@ import { col } from '@smaltworks/smaltdf';
 - [`list.head`](./head): The first `n` elements.
 - [`list.tail`](./tail): The last `n` elements.
 - [`list.concat`](./concat): The list's elements, then another's.
+- [`concatList`](./concatList): One list of values and lists, in order.
 - [`list.gather`](./gather): The elements at a list of positions.
 - [`list.gatherEvery`](./gatherEvery): Every `n`-th element.
 - [`list.sample`](./sample): Elements chosen at random.
@@ -82,7 +83,14 @@ A body runs per element in one pass over each list: [`element()`](./element) is 
 
 ### Structs
 
+- [`struct`](./struct): A struct of named values.
 - [`struct.field`](./field): A struct's field, by name.
+- [`struct.withFields`](./withFields): The struct with fields added, or replaced where a name is taken.
+- [`struct.renameFields`](./renameFields): The same values under new field names.
+- [`struct.drop`](./drop): The struct without some of its fields.
+- [`struct.select`](./select): A struct of some of the fields, in a given order.
+- [`struct.jsonEncode`](./jsonEncode): The struct as JSON text.
+- [`list.toStruct`](./toStruct): A struct of a list's elements, by position.
 
 ## Rules they share
 

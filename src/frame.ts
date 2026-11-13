@@ -45,7 +45,7 @@ type Step =
   | { readonly kind: 'join'; readonly other: Frame; readonly options: JoinOptions }
   | { readonly kind: 'joinAsof'; readonly other: Frame; readonly options: AsofOptions }
   | { readonly kind: 'unpivot'; readonly options: UnpivotOptions }
-  | { readonly kind: 'explode'; readonly column: string; readonly options: ExplodeOptions }
+  | { readonly kind: 'explode'; readonly column: string | readonly string[]; readonly options: ExplodeOptions }
   | { readonly kind: 'unnest'; readonly column: string }
   | { readonly kind: 'pivot'; readonly on: string; readonly options: PivotOptions }
   | { readonly kind: 'sample'; readonly options: SampleOptions };
@@ -195,11 +195,14 @@ export class Frame {
   }
 
   /**
-   * One row per element of list column `column`, the other columns repeated (docs/reference/list/). An empty
-   * list gives no row (one with null with `emptyAsNull`), a null list one row with null (none with `keepNulls: false`).
+   * One row per element of list column `columns`, the other columns repeated (docs/reference/frames/explode). Several
+   * columns are exploded together, element by element: their lists must be as long as each other in each row. An
+   * empty list gives no row (one with null with `emptyAsNull`), a null list one row with null (none with
+   * `keepNulls: false`).
    */
-  explode(column: string, options: ExplodeOptions = {}): Frame {
-    return this.withStep({ kind: 'explode', column, options });
+  explode(columns: string | readonly string[], options: ExplodeOptions = {}): Frame {
+    if (Array.isArray(columns) && columns.length === 0) throw new DfError('SMALTDF_SCHEMA', 'explode: name at least one column');
+    return this.withStep({ kind: 'explode', column: columns, options });
   }
 
   /** Struct column `column` replaced by one column per field, named as the fields. */
@@ -447,12 +450,21 @@ export class Frame {
           ({ op, columns } = unpivotStep({ op, columns }, this.source, step.options));
           break;
         case 'explode': {
-          const [i] = pick('explode', this.source, columns, [step.column]);
-          const t = columns[i!]!.type;
-          const el = listElement(t);
-          if (el === undefined) throw new DfError('SMALTDF_TYPE', `explode: ${step.column} is ${t}, not a list`);
-          op = p.explode(op, i!, planType(t), { emptyAsNull: step.options.emptyAsNull ?? false, keepNulls: step.options.keepNulls ?? true });
-          columns = columns.map((c, k) => (k === i ? { name: c.name, type: el } : c));
+          const names = typeof step.column === 'string' ? [step.column] : step.column;
+          if (new Set(names).size !== names.length) throw new DfError('SMALTDF_SCHEMA', `explode: a column is named twice (${names.join(', ')})`);
+          const at = pick('explode', this.source, columns, names);
+          const elements = new Map<number, DfType>();
+          for (let j = 0; j < at.length; j++) {
+            const t = columns[at[j]!]!.type;
+            const el = listElement(t);
+            if (el === undefined) throw new DfError('SMALTDF_TYPE', `explode: ${names[j]} is ${t}, not a list`);
+            elements.set(at[j]!, el);
+          }
+          // The first column's lists drive the rows; the others are read element by element beside them.
+          const [first, ...rest] = at as number[];
+          const also = rest.map((k) => ({ column: k, type: planType(columns[k]!.type) }));
+          op = { ...p.explode(op, first!, planType(columns[first!]!.type), { emptyAsNull: step.options.emptyAsNull ?? false, keepNulls: step.options.keepNulls ?? true, also }), origin: { step: 'explode' } } as PlanOp;
+          columns = columns.map((c, k) => (elements.has(k) ? { name: c.name, type: elements.get(k)! } : c));
           break;
         }
         case 'unnest': {

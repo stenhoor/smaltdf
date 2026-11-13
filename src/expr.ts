@@ -184,24 +184,51 @@ export class Expr {
   /** List methods (docs/reference/list/). */
   get list(): ListMethods {
     const m = (name: string, ...args: ExprLike[]) => this.op(`list.${name}`, ...args);
+    const whole = (method: string, what: string, n: number): number => {
+      if (!Number.isSafeInteger(n)) throw new DfError('SMALTDF_RANGE', `list.${method}: expected a whole number for ${what}, not ${n}`);
+      return n;
+    };
     return {
       len: () => m('len'),
-      get: (index: ExprLike) => m('get', index),
+      get: (index: ExprLike, options: { nullOnOob?: boolean } = {}) => (options.nullOnOob === false ? m('get', index, true) : m('get', index)),
       first: () => m('get', 0),
       last: () => m('get', -1),
-      contains: (item: ExprLike) => m('contains', item),
+      contains: (item: ExprLike, options: { nullsEqual?: boolean } = {}) => (options.nullsEqual === false ? m('contains', item, false) : m('contains', item)),
       slice: (offset: ExprLike, length?: ExprLike) => (length === undefined ? m('slice', offset) : m('slice', offset, length)),
       head: (n = 5) => m('slice', 0, n),
       tail: (n = 5) => m('slice', -n),
       concat: (other: ExprLike) => m('concat', other),
-      join: (separator: string) => m('join', separator),
-      sort: (options: { descending?: boolean } = {}) => m('sort', options.descending ?? false),
+      join: (separator: string, options: { ignoreNulls?: boolean } = {}) => (options.ignoreNulls === false ? m('join', separator, true) : m('join', separator)),
+      sort: (options: { descending?: boolean; nullsLast?: boolean } = {}) => m('sort', options.descending ?? false, options.nullsLast ?? false),
       unique: () => m('unique'),
       reverse: () => m('reverse'),
       sum: () => m('sum'),
       mean: () => m('mean'),
       min: () => m('min'),
       max: () => m('max'),
+      median: () => m('median'),
+      std: (ddof = 1) => m('std', whole('std', 'ddof', ddof)),
+      var: (ddof = 1) => m('var', whole('var', 'ddof', ddof)),
+      nUnique: () => m('nUnique'),
+      argMin: () => m('argMin'),
+      argMax: () => m('argMax'),
+      countMatches: (item: ExprLike) => m('countMatches', item),
+      all: () => m('all'),
+      any: () => m('any'),
+      dropNulls: () => m('dropNulls'),
+      shift: (n: ExprLike = 1) => m('shift', n),
+      diff: (n = 1) => m('diff', whole('diff', 'n', n)),
+      gather: (indices: ExprLike, options: { nullOnOob?: boolean } = {}) => (options.nullOnOob === false ? m('gather', indices, true) : m('gather', indices)),
+      gatherEvery: (n: number, offset = 0) => m('gatherEvery', whole('gatherEvery', 'n', n), whole('gatherEvery', 'offset', offset)),
+      sample: (n: number, options: { withReplacement?: boolean; seed?: number } = {}) =>
+        options.seed === undefined
+          ? m('sample', whole('sample', 'n', n), options.withReplacement ?? false)
+          : m('sample', whole('sample', 'n', n), options.withReplacement ?? false, whole('sample', 'seed', options.seed)),
+      item: () => m('item'),
+      setUnion: (other: ExprLike) => m('setUnion', other),
+      setIntersection: (other: ExprLike) => m('setIntersection', other),
+      setDifference: (other: ExprLike) => m('setDifference', other),
+      setSymmetricDifference: (other: ExprLike) => m('setSymmetricDifference', other),
     };
   }
 
@@ -239,22 +266,22 @@ export class Expr {
 export interface ListMethods {
   /** The number of elements. */
   len(): Expr;
-  /** The element at `index` (from 0; negative from the end), or null out of range. */
-  get(index: ExprLike): Expr;
+  /** The element at `index` (from 0; negative from the end): null out of range, or an error with `nullOnOob: false`. */
+  get(index: ExprLike, options?: { nullOnOob?: boolean }): Expr;
   first(): Expr;
   last(): Expr;
-  /** Whether an element equals `item`. */
-  contains(item: ExprLike): Expr;
+  /** Whether an element equals `item`; a null `item` finds null elements, unless `nullsEqual` is false (then null). */
+  contains(item: ExprLike, options?: { nullsEqual?: boolean }): Expr;
   /** The elements from `offset` (negative from the end), `length` of them or to the end. */
   slice(offset: ExprLike, length?: ExprLike): Expr;
   head(n?: number): Expr;
   tail(n?: number): Expr;
   /** This list, then `other`. */
   concat(other: ExprLike): Expr;
-  /** The non-null elements as text, joined by `separator`. */
-  join(separator: string): Expr;
-  /** The elements sorted, nulls first. */
-  sort(options?: { descending?: boolean }): Expr;
+  /** The non-null elements as text, joined by `separator`; with `ignoreNulls: false`, null if an element is null. */
+  join(separator: string, options?: { ignoreNulls?: boolean }): Expr;
+  /** The elements sorted, nulls first (last with `nullsLast`). */
+  sort(options?: { descending?: boolean; nullsLast?: boolean }): Expr;
   /** The elements without repeats, the first of each, in order. */
   unique(): Expr;
   reverse(): Expr;
@@ -263,6 +290,46 @@ export interface ListMethods {
   mean(): Expr;
   min(): Expr;
   max(): Expr;
+  /** The median of the non-null elements; null for none. */
+  median(): Expr;
+  /** The standard deviation of the non-null elements, `ddof` (default 1) degrees of freedom taken away. */
+  std(ddof?: number): Expr;
+  /** The variance of the non-null elements, `ddof` (default 1) degrees of freedom taken away. */
+  var(ddof?: number): Expr;
+  /** The number of distinct elements, null counting as one. */
+  nUnique(): Expr;
+  /** The position of the smallest non-null element, the first of equals; null for none. */
+  argMin(): Expr;
+  /** The position of the largest non-null element, the first of equals; null for none. */
+  argMax(): Expr;
+  /** The number of elements equal to `item` (null counts the null elements). */
+  countMatches(item: ExprLike): Expr;
+  /** Whether every non-null element is true (true for none). */
+  all(): Expr;
+  /** Whether any non-null element is true (false for none). */
+  any(): Expr;
+  /** The non-null elements. */
+  dropNulls(): Expr;
+  /** The elements moved `n` places later (earlier for negative `n`), nulls filling the places left. */
+  shift(n?: ExprLike): Expr;
+  /** Each element less the one `n` places before it; null for the first `n`. */
+  diff(n?: number): Expr;
+  /** The elements at a list of positions: null out of range, or an error with `nullOnOob: false`. */
+  gather(indices: ExprLike, options?: { nullOnOob?: boolean }): Expr;
+  /** Every `n`-th element, from `offset`. */
+  gatherEvery(n: number, offset?: number): Expr;
+  /** `n` elements chosen at random (in the list's order without replacement); a `seed` gives the same choice each time. */
+  sample(n: number, options?: { withReplacement?: boolean; seed?: number }): Expr;
+  /** The one element of a list of one; any other length is an error. */
+  item(): Expr;
+  /** The elements of either list, each once, in first-appearance order. */
+  setUnion(other: ExprLike): Expr;
+  /** The elements of both lists, each once, in this list's order. */
+  setIntersection(other: ExprLike): Expr;
+  /** The elements of this list that aren't in `other`, each once, in order. */
+  setDifference(other: ExprLike): Expr;
+  /** The elements of one list but not both, each once: this list's, then `other`'s. */
+  setSymmetricDifference(other: ExprLike): Expr;
 }
 
 /** The `dt` methods of an expression of dates and times. */
@@ -599,15 +666,19 @@ function resolveList(
   need(el !== undefined || a.type === 'null', 'takes a list');
   const elem = el ?? 'any';
   const call = (fn: string, type: DfType) => out(p.call(fn, args.map((x) => x.plan), planType(type)), type);
+  const [, , c] = args as [Resolved, Resolved | undefined, Resolved | undefined];
+  const ints = (xs: readonly (Resolved | undefined)[]): boolean => xs.every((x) => x === undefined || x.type === 'int' || x.type === 'null');
+  const numbers = () => need(isNumeric(elem) || elem === 'bool', 'takes a list of numbers');
+  const sameList = () => need(b!.type === a.type || b!.type === 'null' || a.type === 'null' || (listElement(b!.type) !== undefined && comparable(elem, listElement(b!.type)!)), 'takes two lists of one type');
   switch (name) {
     case 'len':
       return call('list_len', 'int');
     case 'get':
-      need(b!.type === 'int', 'takes a list and a whole-number index');
+      need(ints([b]), 'takes a list and a whole-number index');
       return call('list_get', elem);
     case 'contains':
       need(comparable(elem, b!.type), 'looks for a value of the list\'s element type');
-      return out(p.call('list_contains', [a.plan, b!.plan], 'int'), 'bool');
+      return out(p.call('list_contains', args.map((x) => x.plan), 'int'), 'bool');
     case 'slice':
       need(args.slice(1).every((x) => x.type === 'int'), 'takes a whole-number offset and length');
       return call('list_slice', a.type);
@@ -618,23 +689,67 @@ function resolveList(
       need(elem === 'text' || elem === 'any', 'joins a list of text');
       return call('list_join', 'text');
     case 'sort':
-      return out(p.call('list_sort', [a.plan, p.lit(b!.plan.k === 'lit' && b!.plan.value === 1 ? 1 : 0, 'int')], planType(a.type)), a.type);
+      return call('list_sort', a.type);
     case 'unique':
     case 'reverse':
       return call(`list_${name}`, a.type);
     case 'sum':
-      need(isNumeric(elem) || elem === 'bool', 'takes a list of numbers');
+      numbers();
       return call('list_sum', elem === 'real' ? 'real' : elem === 'int' || elem === 'bool' ? 'int' : 'num');
     case 'mean':
-      need(isNumeric(elem) || elem === 'bool', 'takes a list of numbers');
-      return call('list_mean', 'real');
+    case 'median':
+    case 'std':
+    case 'var':
+      numbers();
+      return call(`list_${name}`, 'real');
     case 'min':
     case 'max':
       return call(`list_${name}`, elem);
+    case 'nUnique':
+      return call('list_n_unique', 'int');
+    case 'argMin':
+    case 'argMax':
+      return call(name === 'argMin' ? 'list_arg_min' : 'list_arg_max', 'int');
+    case 'countMatches':
+      need(comparable(elem, b!.type), 'counts a value of the list\'s element type');
+      return call('list_count_matches', 'int');
+    case 'all':
+    case 'any':
+      need(isBool(elem), 'takes a list of bool values');
+      return call(`list_${name}`, 'bool');
+    case 'dropNulls':
+      return call('list_drop_nulls', a.type);
+    case 'shift':
+      need(ints([b]), 'takes a whole number of places');
+      return call('list_shift', a.type);
+    case 'diff': {
+      need(isNumeric(elem) || elem === 'bool' || elem === 'duration', 'takes a list of numbers or durations');
+      const t = elem === 'bool' ? 'int' : elem === 'null' ? 'any' : elem;
+      return call('list_diff', `list<${t}>` as DfType);
+    }
+    case 'gather': {
+      const ix = listElement(b!.type);
+      need(b!.type === 'null' || ix === 'int' || ix === 'any' || ix === 'null', 'takes a list of whole-number positions');
+      return call('list_gather', a.type);
+    }
+    case 'gatherEvery':
+      return call('list_gather_every', a.type);
+    case 'sample':
+      return call('list_sample', a.type);
+    case 'item':
+      return call('list_item', elem);
+    case 'setUnion':
+    case 'setIntersection':
+    case 'setDifference':
+    case 'setSymmetricDifference':
+      sameList();
+      return call(SET_FNS[name]!, a.type);
     default:
       throw new DfError('SMALTDF_TYPE', `${scope.step}: unknown method list.${name}`);
   }
 }
+
+const SET_FNS: Readonly<Record<string, string>> = { setUnion: 'list_union', setIntersection: 'list_intersect', setDifference: 'list_except', setSymmetricDifference: 'list_symmetric_except' };
 
 const DT_PARTS: Readonly<Record<string, [string, readonly DfType[]]>> = {
   year: ['year', ['date', 'datetime']],

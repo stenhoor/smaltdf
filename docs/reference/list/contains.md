@@ -9,7 +9,7 @@ list-contains
 ## Signature
 
 ```typescript
-expr.list.contains(item: ExprLike): Expr
+expr.list.contains(item: ExprLike, options?: { nullsEqual?: boolean }): Expr
 ```
 
 ## Parameters
@@ -17,6 +17,7 @@ expr.list.contains(item: ExprLike): Expr
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `item` | `ExprLike` | The value to look for: a value, or an expression of the element type. |
+| `nullsEqual` | `boolean` | Whether a null `item` finds null elements (default `true`); with `false`, a null `item` gives null. |
 
 ## Returns
 
@@ -43,6 +44,18 @@ posts.select('scores', col('scores').list.contains(5).alias('has_5'));
 | [] | false |
 | null | null |
 | [5,null,5] | true |
+
+A null `item`, finding null elements or not:
+
+```ts
+const withNulls = frame({ id: [1, 2], scores: [[3, null], [1]] });
+withNulls.select('scores', col('scores').list.contains(null).alias('has_null'), col('scores').list.contains(null, { nullsEqual: false }).alias('unknown'));
+```
+
+| scores | has_null | unknown |
+| --- | --- | --- |
+| [3,null] | true | null |
+| [1] | false | null |
 
 ## Demo
 

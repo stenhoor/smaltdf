@@ -9,7 +9,7 @@ list-get
 ## Signature
 
 ```typescript
-expr.list.get(index: ExprLike): Expr
+expr.list.get(index: ExprLike, options?: { nullOnOob?: boolean }): Expr
 ```
 
 ## Parameters
@@ -17,6 +17,7 @@ expr.list.get(index: ExprLike): Expr
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `index` | `ExprLike` | The position, from 0; negative from the end. A value or an `int` expression. |
+| `nullOnOob` | `boolean` | A position out of range gives null (default `true`); `false` makes it an error. |
 
 ## Returns
 
@@ -27,6 +28,7 @@ The element, of the list's element type; null when the position is out of range.
 | Code | When |
 | --- | --- |
 | `SMALTDF_TYPE` | The value isn't a list. |
+| `SMALT_RANGE` | The position is out of range and `nullOnOob` is `false`. |
 
 ## Examples
 
@@ -43,6 +45,13 @@ posts.select('scores', col('scores').list.get(1).alias('second'), col('scores').
 | [] | null | null |
 | null | null | null |
 | [5,null,5] | null | 5 |
+
+Out of range is an error with `nullOnOob: false`:
+
+<!-- docs:error SMALT_RANGE -->
+```ts
+frame({ v: [[1, 2]] }).select(col('v').list.get(5, { nullOnOob: false }));
+```
 
 ## Demo
 

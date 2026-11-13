@@ -9,7 +9,7 @@ list-join
 ## Signature
 
 ```typescript
-expr.list.join(separator: string): Expr
+expr.list.join(separator: string, options?: { ignoreNulls?: boolean }): Expr
 ```
 
 ## Parameters
@@ -17,6 +17,7 @@ expr.list.join(separator: string): Expr
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `separator` | `string` | Put between elements. |
+| `ignoreNulls` | `boolean` | Leave null elements out (default `true`); with `false`, a null element makes the result null. |
 
 ## Returns
 
@@ -43,6 +44,18 @@ posts.select('tags', col('tags').list.join(', ').alias('joined'));
 | [] |  |
 | null | null |
 | ["c",null] | c |
+
+Keeping nulls:
+
+```ts
+const names = frame({ parts: [['Ada', null, 'Lovelace'], ['Grace', 'Hopper']] });
+names.select(col('parts').list.join(' ').alias('skip'), col('parts').list.join(' ', { ignoreNulls: false }).alias('keep'));
+```
+
+| skip | keep |
+| --- | --- |
+| Ada Lovelace | null |
+| Grace Hopper | Grace Hopper |
 
 ## Demo
 

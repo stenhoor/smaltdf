@@ -1,6 +1,6 @@
 # `list.sort`
 
-The elements sorted, nulls first.
+The elements sorted, nulls first (or last).
 
 ```railroad
 list-sort
@@ -9,7 +9,7 @@ list-sort
 ## Signature
 
 ```typescript
-expr.list.sort(options?: { descending?: boolean }): Expr
+expr.list.sort(options?: { descending?: boolean; nullsLast?: boolean }): Expr
 ```
 
 ## Parameters
@@ -17,6 +17,7 @@ expr.list.sort(options?: { descending?: boolean }): Expr
 | Parameter | Type | Meaning |
 | --- | --- | --- |
 | `descending` | `boolean` | Largest first. Default `false`. |
+| `nullsLast` | `boolean` | Nulls after the values. Default `false`: first. |
 
 ## Returns
 
@@ -30,7 +31,7 @@ A list of the same type.
 
 ## Notes
 
-- Nulls come first in both directions.
+- Nulls come first in both directions, unless `nullsLast`.
 
 ## Examples
 
@@ -47,6 +48,17 @@ posts.select('scores', col('scores').list.sort().alias('asc'), col('scores').lis
 | [] | [] | [] |
 | null | null | null |
 | [5,null,5] | [null,5,5] | [null,5,5] |
+
+Nulls last:
+
+```ts
+const withNulls = frame({ id: [1], scores: [[5, null, 3]] });
+withNulls.select(col('scores').list.sort({ nullsLast: true }).alias('asc'), col('scores').list.sort({ descending: true, nullsLast: true }).alias('desc'));
+```
+
+| asc | desc |
+| --- | --- |
+| [3,5,null] | [5,3,null] |
 
 ## Demo
 

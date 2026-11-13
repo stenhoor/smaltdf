@@ -3,7 +3,7 @@
  * A case is the same unless it says how the two differ (`differs`); compare.test.ts checks both ways, and writes the
  * differences into docs/guide/polars.md.
  */
-import { col, concat, frame, len, lit, table, type Frame } from '../src/index.js';
+import { col, concat, element, frame, len, lit, table, type Frame } from '../src/index.js';
 
 /** A table as both sides make it: columns typed `int`, `real`, `text`, `date` or `datetime` (as result text). */
 export interface CompareTable {
@@ -177,6 +177,10 @@ export const CASES: readonly Case[] = [
   { id: 'list-sample', fn: 'list.sample', df: lists().filter(col('v').list.len().gt(0)).select(col('v').list.sample(2, { seed: 1 })), polars: `${LISTS}.filter(pl.col('v').list.len() > 0).select(pl.col('v').list.sample(2, seed=1))`, differs: 'The same number of elements, chosen by another random generator: a seed repeats smaltdf\'s choice, not Polars\'.' },
   { id: 'list-sets', fn: 'list.setUnion', df: lists().select(col('v').list.setUnion(col('o')), col('v').list.setIntersection(col('o')).alias('both'), col('v').list.setSymmetricDifference(col('o')).alias('either')), polars: `${LISTS}.select(pl.col('v').list.set_union(pl.col('o')), pl.col('v').list.set_intersection(pl.col('o')).alias('both'), pl.col('v').list.set_symmetric_difference(pl.col('o')).alias('either'))` },
   { id: 'list-set-difference', fn: 'list.setDifference', df: lists().select(col('v').list.setDifference(col('o'))), polars: `${LISTS}.select(pl.col('v').list.set_difference(pl.col('o')))`, differs: 'The same elements, in first-appearance order (`[1, 2]` from `[3, 1, 2]`); Polars 2.1 can give them in another order (`[2, 1]`).' },
+  { id: 'list-eval', fn: 'list.eval', df: lists().select(col('v').list.eval(element().mul(2)), col('v').list.eval(element().position()).alias('pos')), polars: `${LISTS}.select(pl.col('v').list.eval(pl.element() * 2), pl.col('v').list.eval(pl.int_range(pl.len())).alias('pos'))` },
+  { id: 'list-filter', fn: 'list.filter', df: lists().select(col('v').list.filter(element().gt(1))), polars: `${LISTS}.select(pl.col('v').list.filter(pl.element() > 1))` },
+  { id: 'list-agg', fn: 'list.agg', df: lists().select(col('v').list.agg(element().sum()), col('v').list.agg(element().max().sub(element().min())).alias('range'), col('v').list.agg(element().sum().div(len())).alias('per')), polars: `${LISTS}.select(pl.col('v').list.agg(pl.element().sum()), pl.col('v').list.agg(pl.element().max() - pl.element().min()).alias('range'), pl.col('v').list.agg(pl.element().sum() / pl.element().len()).alias('per'))` },
+  { id: 'list-eval-row', fn: 'element', df: lists().select(col('v').list.eval(element().add(col('id')))), polars: `${LISTS}.select(pl.col('v').list.eval(pl.element() + pl.col('id')))`, differs: 'A body may read the row\'s columns (`col`); Polars refuses named columns in `eval`.' },
   { id: 'explode', fn: 'explode', df: lists().select('id', 't').explode('t'), polars: `${LISTS}.select('id', 't').explode('t')` },
   { id: 'implode', fn: 'implode', df: lists().select('id', 't').explode('t').groupBy('id', { maintainOrder: true }).agg(col('t').implode()), polars: `${LISTS}.select('id', 't').explode('t').group_by('id', maintain_order=True).agg(pl.col('t'))` },
   { id: 'struct-field', fn: 'struct.field', df: lists().select(col('pt').struct.field('y')), polars: `${LISTS}.select(pl.col('pt').struct.field('y'))` },

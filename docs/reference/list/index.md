@@ -70,6 +70,16 @@ Each element once (null is one value), in first-appearance order.
 
 - [`list.join`](./join): A list of text's non-null elements, joined by a separator.
 
+### Expressions over elements
+
+A body runs per element in one pass over each list: [`element()`](./element) is the element, and `col` reads the row.
+
+- [`list.eval`](./eval): The list of an expression for each element.
+- [`list.filter`](./filter): The elements for which a predicate is true.
+- [`list.agg`](./agg): An expression of aggregates over the elements.
+- [`element`](./element): The element a body runs over; `element(1)` the one around it.
+- [`position`](./position): The position of `element()` in its list.
+
 ### Structs
 
 - [`struct.field`](./field): A struct's field, by name.

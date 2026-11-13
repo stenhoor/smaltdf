@@ -3,7 +3,7 @@
  * methods, implode, explode, unnest, and writes. In process and through the worker.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { col, frame, lit, table } from '../src/index.js';
+import { col, element, frame, len, lit, table } from '../src/index.js';
 import { KINDS, makeDb } from './helpers/db.js';
 
 const closers: (() => Promise<void>)[] = [];
@@ -103,6 +103,32 @@ describe.each(KINDS)('%s', (kind) => {
     expect(() => col('scores').list.sample(1.5)).toThrow(/list\.sample: expected a whole number for n/);
     await fails(col('scores').list.item(), /list_item: the list has 3 elements, not 1/);
     await fails(col('scores').list.get(9, { nullOnOob: false }), /list_get: index 9 is out of range for a list of 3/);
+  });
+
+  it('list.eval, list.filter and list.agg run a body per element, reading the row; element() only in a body', async () => {
+    const db = await open();
+    const s = col('scores').list;
+    const r = await posts()
+      .select(s.eval(element().add(col('id'))).alias('e'), s.filter(element().ne(1)).alias('f'), s.agg(element().median().add(len())).alias('a'), col('tags').list.eval(element().position()).alias('p'))
+      .collect(db);
+    expect(r.types).toEqual(['list<int>', 'list<int>', 'real', 'list<int>']);
+    expect(r.rows).toEqual([
+      [[4, 2, 3], [3, 2], 5, [0, 1]],
+      [[], [], null, []],
+      [null, null, null, null],
+      [[9, null, 9], [5, 5], 8, [0]],
+    ]);
+    // A body's aggregates are the list's, not the frame's: the select stays per row.
+    expect((await posts().select('id', s.agg(element().sum())).collect(db)).rows.length).toBe(4);
+    const fails = async (e: ReturnType<typeof col>, pattern: RegExp) => expect(posts().select(e).collect(db)).rejects.toThrow(pattern);
+    await fails(element(), /select: element\(\) is only inside list\.eval, list\.filter or list\.agg/);
+    await fails(s.eval(element(1)), /element\(1\): there are 1 lists around it/);
+    await fails(s.eval(element().sum()), /list\.eval: sum is an aggregate: aggregate a list's elements with list\.agg/);
+    await fails(s.agg(element()), /list\.agg: element\(\) goes inside an aggregate there/);
+    await fails(s.filter(element()), /list\.filter: takes a bool predicate, not int/);
+    await fails(col('id').list.eval(element()), /list\.eval: takes a list, not int/);
+    expect(() => col('x').position()).toThrow(/only element\(\) has a position/);
+    expect(() => element(-1)).toThrow(/element: expected a depth of 0 or more, not -1/);
   });
 
   it('a table keeps them: LIST and STRUCT storage', async () => {

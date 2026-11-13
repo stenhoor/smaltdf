@@ -83,13 +83,14 @@ refreshView ::= 'refreshView' '(' db ',' name ')'
 
 /* Expressions */
 
-expr ::= (col | lit | len) ('.' expr-method)*
+expr ::= (col | lit | len | element) ('.' expr-method)*
 
 col ::= 'col' '(' name ')'
 lit ::= 'lit' '(' value ')'
 len ::= 'len' '(' ')'
+element ::= 'element' '(' n? ')'
 
-expr-method ::= arithmetic | comparison | logic | null-test | alias | cast | round
+expr-method ::= arithmetic | comparison | logic | null-test | alias | cast | round | position
               | aggregate | window-function | over | 'str' '.' str-method | 'dt' '.' dt-method
               | 'list' '.' list-method | 'struct' '.' struct-field
 
@@ -122,6 +123,7 @@ isNotNull ::= 'isNotNull' '(' ')'
 alias ::= 'alias' '(' name ')'
 cast ::= 'cast' '(' ("'int'" | "'real'" | "'text'" | "'blob'" | "'date'" | "'datetime'") ')'
 round ::= 'round' '(' digits? ')'
+position ::= 'position' '(' ')'
 
 /* Aggregates */
 
@@ -190,7 +192,7 @@ list-method ::= list-len | list-get | list-first | list-last | list-contains | l
               | list-max | list-median | list-std | list-var | list-nUnique | list-argMin | list-argMax
               | list-countMatches | list-all | list-any | list-dropNulls | list-shift | list-diff | list-gather
               | list-gatherEvery | list-sample | list-item | list-setUnion | list-setIntersection | list-setDifference
-              | list-setSymmetricDifference
+              | list-setSymmetricDifference | list-eval | list-filter | list-agg
 list-len ::= 'len' '(' ')'
 list-get ::= 'get' '(' expr-like (',' '{' 'nullOnOob' ':' boolean '}')? ')'
 list-first ::= 'first' '(' ')'
@@ -228,6 +230,9 @@ list-setUnion ::= 'setUnion' '(' expr-like ')'
 list-setIntersection ::= 'setIntersection' '(' expr-like ')'
 list-setDifference ::= 'setDifference' '(' expr-like ')'
 list-setSymmetricDifference ::= 'setSymmetricDifference' '(' expr-like ')'
+list-eval ::= 'eval' '(' expr ')'
+list-filter ::= 'filter' '(' expr ')'
+list-agg ::= 'agg' '(' expr ')'
 struct-field ::= 'field' '(' name ')'
 
 /* Registering smaltdf where the engine runs, so it reads smaltdf's views */

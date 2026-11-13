@@ -6,8 +6,8 @@ true. Order is compared too, except where neither side promises one (`groupBy` a
 
 <!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->
 
-With Polars 2.1.0, 85 of the 96 cases give the same columns, types and rows (or both an
-error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`, `dt.year`, `dt.hour`, `dt.date`, `dt.truncate`, `dt.offsetBy`, `dt.strftime`, `sub`, `gt`, `str.toDatetime`, `str.toDate`, `dt.toZone`, `dt.fromZone`, `list.len`, `list.contains`, `list.sort`, `list.unique`, `list.sum`, `list.join`, `list.slice`, `list.concat`, `list.get`, `list.median`, `list.nUnique`, `list.all`, `list.shift`, `list.gather`, `list.item`, `list.setUnion`, `explode`, `implode`, `struct.field`, `unnest`.
+With Polars 2.1.0, 88 of the 100 cases give the same columns, types and rows (or both an
+error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`, `dt.year`, `dt.hour`, `dt.date`, `dt.truncate`, `dt.offsetBy`, `dt.strftime`, `sub`, `gt`, `str.toDatetime`, `str.toDate`, `dt.toZone`, `dt.fromZone`, `list.len`, `list.contains`, `list.sort`, `list.unique`, `list.sum`, `list.join`, `list.slice`, `list.concat`, `list.get`, `list.median`, `list.nUnique`, `list.all`, `list.shift`, `list.gather`, `list.item`, `list.setUnion`, `list.eval`, `list.filter`, `list.agg`, `explode`, `implode`, `struct.field`, `unnest`.
 
 These differ:
 
@@ -24,5 +24,6 @@ These differ:
 | `list.get` | Out of range, `list.get` gives null; Polars fails unless `null_on_oob=True` (`nullOnOob: false` fails as Polars does). |
 | `list.sample` | The same number of elements, chosen by another random generator: a seed repeats smaltdf's choice, not Polars'. |
 | `list.setDifference` | The same elements, in first-appearance order (`[1, 2]` from `[3, 1, 2]`); Polars 2.1 can give them in another order (`[2, 1]`). |
+| `element` | A body may read the row's columns (`col`); Polars refuses named columns in `eval`. |
 
 <!-- compare:end -->

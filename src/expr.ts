@@ -3,7 +3,7 @@
  * its plan is built. Each method maps to the engine operation that means what smaltdf's reference says.
  */
 import * as p from 'smaltdb/plan';
-import type { AggCall, PlanExpr, SortKey, WindowCall, WindowFrame } from 'smaltdb/plan';
+import type { AggCall, EachAggCall, PlanExpr, SortKey, WindowCall, WindowFrame } from 'smaltdb/plan';
 import { DfError, type DfOrigin } from './errors.js';
 import { type DfColumn, type DfType, type TemporalType, isNumeric, isTemporal, listElement, planType, structFields } from './types.js';
 
@@ -16,9 +16,17 @@ type Node =
   | { readonly k: 'op'; readonly method: string; readonly args: readonly Node[] }
   | { readonly k: 'cast'; readonly to: CastType; readonly arg: Node }
   | { readonly k: 'alias'; readonly name: string; readonly arg: Node }
+  | ElementNode
   | AggNode
   | WinNode
   | OverNode;
+
+/** @internal An element of the list a `list.eval`, `list.filter` or `list.agg` body runs over, `depth` lists out. */
+export interface ElementNode {
+  readonly k: 'element';
+  readonly part: 'value' | 'position';
+  readonly depth: number;
+}
 
 /** Window functions (docs/reference/windows/): over the frame's rows in order, or a partition's. */
 export type WinFn = 'cumSum' | 'cumMin' | 'cumMax' | 'cumCount' | 'shift' | 'rank';
@@ -73,6 +81,11 @@ export interface Scope {
   readonly agg?: (n: AggNode) => Resolved;
   /** Resolves a window function or an `over`, where the step computes windows (select, withColumns, filter). */
   readonly win?: (n: WinNode | OverNode) => Resolved;
+  /**
+   * Inside `list.eval`, `list.filter` and `list.agg` bodies: the lists they run over, the innermost last, with their
+   * element type and whether `element()` reads them there (not in a `list.agg` body outside its aggregates).
+   */
+  readonly elements?: readonly { readonly type: DfType; readonly readable: boolean; readonly method: string }[];
 }
 
 const node = (x: ExprLike): Node => (x instanceof Expr ? x.node : { k: 'lit', value: x });
@@ -115,6 +128,11 @@ export class Expr {
   cast(to: CastType): Expr { return new Expr({ k: 'cast', to, arg: this.node }); }
   /** The same expression under another name. */
   alias(name: string): Expr { return new Expr({ k: 'alias', name, arg: this.node }); }
+  /** The position of `element()` in its list, from 0. Only on `element()`. */
+  position(): Expr {
+    if (this.node.k !== 'element') throw new DfError('SMALTDF_TYPE', 'position: only element() has a position (element().position())');
+    return new Expr({ ...this.node, part: 'position' });
+  }
   /** Rounding half to even, to `digits` places. */
   round(digits = 0): Expr { return this.op('round', digits); }
 
@@ -184,6 +202,10 @@ export class Expr {
   /** List methods (docs/reference/list/). */
   get list(): ListMethods {
     const m = (name: string, ...args: ExprLike[]) => this.op(`list.${name}`, ...args);
+    const body = (method: string, e: Expr): Expr => {
+      if (!(e instanceof Expr)) throw new DfError('SMALTDF_TYPE', `list.${method}: takes an expression of element()`);
+      return e;
+    };
     const whole = (method: string, what: string, n: number): number => {
       if (!Number.isSafeInteger(n)) throw new DfError('SMALTDF_RANGE', `list.${method}: expected a whole number for ${what}, not ${n}`);
       return n;
@@ -229,6 +251,9 @@ export class Expr {
       setIntersection: (other: ExprLike) => m('setIntersection', other),
       setDifference: (other: ExprLike) => m('setDifference', other),
       setSymmetricDifference: (other: ExprLike) => m('setSymmetricDifference', other),
+      eval: (expr: Expr) => m('eval', body('eval', expr)),
+      filter: (predicate: Expr) => m('filter', body('filter', predicate)),
+      agg: (expr: Expr) => m('agg', body('agg', expr)),
     };
   }
 
@@ -330,6 +355,12 @@ export interface ListMethods {
   setDifference(other: ExprLike): Expr;
   /** The elements of one list but not both, each once: this list's, then `other`'s. */
   setSymmetricDifference(other: ExprLike): Expr;
+  /** The list of `expr` for each element: `element()` is the element, and `col` reads the row. */
+  eval(expr: Expr): Expr;
+  /** The elements for which `predicate` is true, in order. */
+  filter(predicate: Expr): Expr;
+  /** `expr` over aggregates of the elements: `list.agg(element().sum().div(len()))`. */
+  agg(expr: Expr): Expr;
 }
 
 /** The `dt` methods of an expression of dates and times. */
@@ -366,6 +397,15 @@ export interface DtMethods {
 
 /** A column of the frame, by name. */
 export const col = (name: string): Expr => new Expr({ k: 'col', name });
+
+/**
+ * The element of the list a `list.eval`, `list.filter` or `list.agg` body runs over; `depth` reaches the lists around
+ * it (0: the innermost). `element().position()` is its position.
+ */
+export const element = (depth = 0): Expr => {
+  if (!Number.isSafeInteger(depth) || depth < 0) throw new DfError('SMALTDF_RANGE', `element: expected a depth of 0 or more, not ${depth}`);
+  return new Expr({ k: 'element', part: 'value', depth });
+};
 
 /** The number of rows (of the frame, or of each group). */
 export const len = (): Expr => new Expr({ k: 'agg', fn: 'len', arg: null });
@@ -476,7 +516,15 @@ function resolveNode(n: Node, scope: Scope): Resolved {
       return { plan: withOrigin(plan, { step: scope.step, method: 'cast' }), type: n.to, name: a.name };
     }
     case 'op':
-      return resolveOp(n, scope);
+      return EACH.has(n.method) ? resolveEach(n, scope) : resolveOp(n, scope);
+    case 'element': {
+      const frames = scope.elements ?? [];
+      const f = frames[frames.length - 1 - n.depth];
+      if (f === undefined) throw new DfError('SMALTDF_TYPE', frames.length === 0 ? `${scope.step}: element() is only inside list.eval, list.filter or list.agg` : `${scope.step}: element(${n.depth}): there are ${frames.length} lists around it`);
+      if (!f.readable) throw new DfError('SMALTDF_TYPE', `${scope.step}: list.agg: element() goes inside an aggregate there (element().sum())`);
+      if (n.part === 'position') return { plan: p.elementPosition(n.depth), type: 'int', name: 'position' };
+      return { plan: p.element(planType(f.type), n.depth), type: f.type, name: 'element' };
+    }
     case 'agg':
       if (!scope.agg) throw new DfError('SMALTDF_TYPE', `${scope.step}: ${n.fn} is an aggregate: use it in groupBy(…).agg(…), in a select of aggregates only, or per row with .over(…)`);
       return scope.agg(n);
@@ -494,7 +542,8 @@ export function hasAggregate(e: Expr | string): boolean {
       case 'agg':
         return true;
       case 'op':
-        return n.args.some(walk);
+        // A list.eval, list.filter or list.agg body's aggregates are over the list's elements, not the frame's rows.
+        return EACH.has(n.method) ? walk(n.args[0]!) : n.args.some(walk);
       case 'cast':
       case 'alias':
         return walk(n.arg);
@@ -558,6 +607,53 @@ export function resolveAggregate(n: AggNode, input: Scope): { call: AggCall; typ
   }
   const call = p.agg(AGG_FNS[n.fn], [a.plan], planType(type));
   return { call: { ...call, origin: { step: input.step, method: n.fn } } as AggCall, type, name: a.name };
+}
+
+const EACH = new Set(['list.eval', 'list.filter', 'list.agg']);
+
+/** `list.eval`, `list.filter` and `list.agg`: the body resolved once, run per element by the engine (`each`). */
+function resolveEach(n: Node & { k: 'op' }, scope: Scope): Resolved {
+  const m = n.method;
+  const a = resolveNode(n.args[0]!, scope);
+  const el = listElement(a.type);
+  if (el === undefined && a.type !== 'null') throw typeError(scope, m, `takes a list, not ${a.type}`);
+  const type = el ?? 'any';
+  const outer = scope.elements ?? [];
+  const origin: DfOrigin = { step: scope.step, method: m };
+  // Aggregates belong in list.agg; windows aren't per element.
+  const noAgg = (x: AggNode): Resolved => {
+    throw typeError(scope, m, `${x.fn} is an aggregate: aggregate a list's elements with list.agg`);
+  };
+  const inner: Scope = { ...scope, elements: [...outer, { type, readable: true, method: m }], agg: noAgg, win: undefined };
+  if (m === 'list.agg') {
+    const aggs: EachAggCall<PlanExpr>[] = [];
+    const bodyScope: Scope = {
+      ...scope,
+      elements: [...outer, { type, readable: false, method: m }],
+      win: undefined,
+      agg: (x) => {
+        const r = resolveAggregate(x, inner);
+        const { origin: _o, ...call } = r.call as AggCall & { origin?: unknown };
+        aggs.push(call as EachAggCall<PlanExpr>);
+        const ref = p.aggResult(aggs.length - 1, planType(r.type));
+        // A sum of no elements is 0, as the sum of no rows.
+        const plan = x.fn === 'sum' ? p.call('coalesce', [ref, p.lit(0, r.type === 'real' ? 'real' : 'int')], planType(r.type)) : ref;
+        return { plan, type: r.type, name: r.name };
+      },
+    };
+    const body = resolveNode(n.args[1]!, bodyScope);
+    const plan: PlanExpr = { k: 'each', mode: 'agg', list: a.plan, aggs, body: body.plan, type: planType(body.type) } as PlanExpr;
+    return { plan: withOrigin(plan, origin), type: body.type, name: a.name };
+  }
+  const body = resolveNode(n.args[1]!, inner);
+  if (m === 'list.filter') {
+    if (!isBool(body.type)) throw typeError(scope, m, `takes a bool predicate, not ${body.type}`);
+    const plan: PlanExpr = { k: 'each', mode: 'filter', list: a.plan, body: body.plan, type: planType(a.type) } as PlanExpr;
+    return { plan: withOrigin(plan, origin), type: a.type, name: a.name };
+  }
+  const t = `list<${body.type === 'null' ? 'any' : body.type}>` as DfType;
+  const plan: PlanExpr = { k: 'each', mode: 'map', list: a.plan, body: body.plan, type: planType(t) } as PlanExpr;
+  return { plan: withOrigin(plan, origin), type: t, name: a.name };
 }
 
 function resolveOp(n: Node & { k: 'op' }, scope: Scope): Resolved {

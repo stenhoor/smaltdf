@@ -6,7 +6,7 @@ true. Order is compared too, except where neither side promises one (`groupBy` a
 
 <!-- compare:begin (written by compare/compare.test.ts: npm run compare with UPDATE=1) -->
 
-With Polars 2.1.0, 88 of the 100 cases give the same columns, types and rows (or both an
+With Polars 2.1.0, 90 of the 102 cases give the same columns, types and rows (or both an
 error). They cover `filter`, `select`, `withColumns`, `sort`, `head`, `tail`, `slice`, `div`, `floorDiv`, `mod`, `add`, `eq`, `and`, `isNull`, `cast`, `round`, `str.lower`, `str.contains`, `groupBy`, `median`, `sum`, `unique`, `join`, `joinAsof`, `concat`, `over`, `cumSum`, `shift`, `rank`, `pivot`, `unpivot`, `dt.year`, `dt.hour`, `dt.date`, `dt.truncate`, `dt.offsetBy`, `dt.strftime`, `sub`, `gt`, `str.toDatetime`, `str.toDate`, `dt.toZone`, `dt.fromZone`, `list.len`, `list.contains`, `list.sort`, `list.unique`, `list.sum`, `list.join`, `list.slice`, `list.concat`, `list.get`, `list.median`, `list.nUnique`, `list.all`, `list.shift`, `list.gather`, `list.item`, `list.setUnion`, `list.eval`, `list.filter`, `list.agg`, `explode`, `implode`, `struct.field`, `unnest`.
 
 These differ:

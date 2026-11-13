@@ -61,7 +61,7 @@ pivot-option ::= 'index' ':' names | 'values' ':' name
                | 'columns' ':' '[' value (',' value)* ']' | 'maintainOrder' ':' boolean
 unpivot ::= 'unpivot' '(' ('{' unpivot-option (',' unpivot-option)* '}')? ')'
 unpivot-option ::= ('index' | 'on') ':' names | ('variableName' | 'valueName') ':' string
-explode ::= 'explode' '(' name (',' '{' ('emptyAsNull' | 'keepNulls') ':' boolean (',' ('emptyAsNull' | 'keepNulls') ':' boolean)? '}')? ')'
+explode ::= 'explode' '(' names (',' '{' ('emptyAsNull' | 'keepNulls') ':' boolean (',' ('emptyAsNull' | 'keepNulls') ':' boolean)? '}')? ')'
 unnest ::= 'unnest' '(' name ')'
 
 /* Running a frame */

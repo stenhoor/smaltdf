@@ -131,6 +131,19 @@ describe.each(KINDS)('%s', (kind) => {
     expect(() => element(-1)).toThrow(/element: expected a depth of 0 or more, not -1/);
   });
 
+  it('explode of several columns zips them: one row per position, the lists of a row as long as each other', async () => {
+    const db = await open();
+    const r = await posts().select('id', 'tags', 'scores').filter(col('id').ne(4)).explode(['tags', 'scores'], { emptyAsNull: true }).collect(db).catch((e: Error) => e);
+    expect(r).toBeInstanceOf(Error);
+    expect((r as Error).message).toMatch(/explode: lists zipped together have different lengths: 2 and 3/);
+    const z = await frame({ id: [1, 2, 3], a: [[1, 2], [], null], b: [['x', 'y'], [], null] }).explode(['a', 'b'], { emptyAsNull: true }).collect(db);
+    expect(z.types).toEqual(['int', 'int', 'text']);
+    expect(z.rows).toEqual([[1, 1, 'x'], [1, 2, 'y'], [2, null, null], [3, null, null]]);
+    await expect(posts().explode(['tags', 'tags']).collect(db)).rejects.toThrow(/explode: a column is named twice/);
+    await expect(posts().explode(['tags', 'id']).collect(db)).rejects.toThrow(/explode: id is int, not a list/);
+    expect(() => posts().explode([])).toThrow(/explode: name at least one column/);
+  });
+
   it('a table keeps them: LIST and STRUCT storage', async () => {
     const db = await open();
     await posts().createTable(db, 'posts');

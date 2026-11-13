@@ -52,8 +52,23 @@ const o = () => table('orders');
 const n = () => table('nums');
 const e = () => table('events');
 /** Lists and structs come from JavaScript data on both sides (the tables hold no list columns). */
-const lists = () => frame({ id: [1, 2, 3, 4], v: [[3, 1, 2], [], null, [5, null, 5]], t: [['a', 'b'], [], null, ['c']], pt: [{ x: 1, y: 2.5 }, { x: 3, y: null }, null, { x: 0, y: 0 }] });
-const LISTS = "pl.DataFrame({'id': [1, 2, 3, 4], 'v': [[3, 1, 2], [], None, [5, None, 5]], 't': [['a', 'b'], [], None, ['c']], 'pt': [{'x': 1, 'y': 2.5}, {'x': 3, 'y': None}, None, {'x': 0, 'y': 0.0}]})";
+const lists = () =>
+  frame({
+    id: [1, 2, 3, 4],
+    v: [[3, 1, 2], [], null, [5, null, 5]],
+    t: [['a', 'b'], [], null, ['c']],
+    pt: [{ x: 1, y: 2.5 }, { x: 3, y: null }, null, { x: 0, y: 0 }],
+    b: [[true, true, null], [true, false], null, []],
+    o: [[3, 4, null], [1], [2], []],
+    ix: [[0, -1, 5], [0], [1], []],
+    tn: [['a', null], ['b'], null, []],
+  });
+const LISTS =
+  "pl.DataFrame({'id': [1, 2, 3, 4], 'v': [[3, 1, 2], [], None, [5, None, 5]], 't': [['a', 'b'], [], None, ['c']], 'pt': [{'x': 1, 'y': 2.5}, {'x': 3, 'y': None}, None, {'x': 0, 'y': 0.0}]," +
+  " 'b': [[True, True, None], [True, False], None, []], 'o': [[3, 4, None], [1], [2], []], 'ix': [[0, -1, 5], [0], [1], []], 'tn': [['a', None], ['b'], None, []]})";
+/** Lists of one element, for list.item; sampling from lists that have elements. */
+const ones = () => frame({ v: [[7], [null], null] });
+const ONES = "pl.DataFrame({'v': [[7], [None], None]}, schema={'v': pl.List(pl.Int64)})";
 
 export const CASES: readonly Case[] = [
   // Frames
@@ -146,6 +161,22 @@ export const CASES: readonly Case[] = [
   { id: 'list-join', fn: 'list.join', df: lists().select(col('t').list.join('+')), polars: `${LISTS}.select(pl.col('t').list.join('+'))` },
   { id: 'list-slice', fn: 'list.slice', df: lists().select(col('v').list.slice(1), col('v').list.head(2).alias('h'), col('v').list.tail(1).alias('tl')), polars: `${LISTS}.select(pl.col('v').list.slice(1), pl.col('v').list.head(2).alias('h'), pl.col('v').list.tail(1).alias('tl'))` },
   { id: 'list-concat', fn: 'list.concat', df: lists().select(col('v').list.concat(col('v'))), polars: `${LISTS}.select(pl.col('v').list.concat(pl.col('v')))` },
+  { id: 'list-get-oob', fn: 'list.get', df: lists().select(col('v').list.get(5)), polars: `${LISTS}.select(pl.col('v').list.get(5))`, differs: 'Out of range, `list.get` gives null; Polars fails unless `null_on_oob=True` (`nullOnOob: false` fails as Polars does).' },
+  { id: 'list-get-strict', fn: 'list.get', df: lists().select(col('v').list.get(5, { nullOnOob: false })), polars: `${LISTS}.select(pl.col('v').list.get(5))` },
+  { id: 'list-contains-nulls', fn: 'list.contains', df: lists().select(col('v').list.contains(null).alias('eq'), col('v').list.contains(null, { nullsEqual: false }).alias('ne')), polars: `${LISTS}.select(pl.col('v').list.contains(None).alias('eq'), pl.col('v').list.contains(None, nulls_equal=False).alias('ne'))` },
+  { id: 'list-sort-nulls-last', fn: 'list.sort', df: lists().select(col('v').list.sort({ nullsLast: true }), col('v').list.sort({ descending: true, nullsLast: true }).alias('d')), polars: `${LISTS}.select(pl.col('v').list.sort(nulls_last=True), pl.col('v').list.sort(descending=True, nulls_last=True).alias('d'))` },
+  { id: 'list-join-nulls', fn: 'list.join', df: lists().select(col('tn').list.join('-'), col('tn').list.join('-', { ignoreNulls: false }).alias('k')), polars: `${LISTS}.select(pl.col('tn').list.join('-'), pl.col('tn').list.join('-', ignore_nulls=False).alias('k'))` },
+  { id: 'list-stats', fn: 'list.median', df: lists().select(col('v').list.median(), col('v').list.std().alias('std'), col('v').list.var(0).alias('var0')), polars: `${LISTS}.select(pl.col('v').list.median(), pl.col('v').list.std().alias('std'), pl.col('v').list.var(ddof=0).alias('var0'))` },
+  { id: 'list-counts', fn: 'list.nUnique', df: lists().select(col('v').list.nUnique(), col('v').list.argMin().alias('amin'), col('v').list.argMax().alias('amax'), col('v').list.countMatches(5).alias('cm'), col('v').list.countMatches(null).alias('cmn')), polars: `${LISTS}.select(pl.col('v').list.n_unique(), pl.col('v').list.arg_min().alias('amin'), pl.col('v').list.arg_max().alias('amax'), pl.col('v').list.count_matches(5).alias('cm'), pl.col('v').list.count_matches(None).alias('cmn'))` },
+  { id: 'list-all-any', fn: 'list.all', df: lists().select(col('b').list.all(), col('b').list.any().alias('any')), polars: `${LISTS}.select(pl.col('b').list.all(), pl.col('b').list.any().alias('any'))` },
+  { id: 'list-changes', fn: 'list.shift', df: lists().select(col('v').list.dropNulls(), col('v').list.shift().alias('sh'), col('v').list.shift(-1).alias('back'), col('v').list.diff().alias('diff')), polars: `${LISTS}.select(pl.col('v').list.drop_nulls(), pl.col('v').list.shift().alias('sh'), pl.col('v').list.shift(-1).alias('back'), pl.col('v').list.diff().alias('diff'))` },
+  { id: 'list-gather', fn: 'list.gather', df: lists().select(col('v').list.gather(col('ix')), col('v').list.gatherEvery(2).alias('ev'), col('v').list.gatherEvery(2, 1).alias('odd')), polars: `${LISTS}.select(pl.col('v').list.gather(pl.col('ix'), null_on_oob=True), pl.col('v').list.gather_every(2).alias('ev'), pl.col('v').list.gather_every(2, 1).alias('odd'))` },
+  { id: 'list-gather-strict', fn: 'list.gather', df: lists().select(col('v').list.gather(col('ix'), { nullOnOob: false })), polars: `${LISTS}.select(pl.col('v').list.gather(pl.col('ix')))` },
+  { id: 'list-item', fn: 'list.item', df: ones().select(col('v').list.item()), polars: `${ONES}.select(pl.col('v').list.item())` },
+  { id: 'list-item-many', fn: 'list.item', df: lists().select(col('v').list.item()), polars: `${LISTS}.select(pl.col('v').list.item())` },
+  { id: 'list-sample', fn: 'list.sample', df: lists().filter(col('v').list.len().gt(0)).select(col('v').list.sample(2, { seed: 1 })), polars: `${LISTS}.filter(pl.col('v').list.len() > 0).select(pl.col('v').list.sample(2, seed=1))`, differs: 'The same number of elements, chosen by another random generator: a seed repeats smaltdf\'s choice, not Polars\'.' },
+  { id: 'list-sets', fn: 'list.setUnion', df: lists().select(col('v').list.setUnion(col('o')), col('v').list.setIntersection(col('o')).alias('both'), col('v').list.setSymmetricDifference(col('o')).alias('either')), polars: `${LISTS}.select(pl.col('v').list.set_union(pl.col('o')), pl.col('v').list.set_intersection(pl.col('o')).alias('both'), pl.col('v').list.set_symmetric_difference(pl.col('o')).alias('either'))` },
+  { id: 'list-set-difference', fn: 'list.setDifference', df: lists().select(col('v').list.setDifference(col('o'))), polars: `${LISTS}.select(pl.col('v').list.set_difference(pl.col('o')))`, differs: 'The same elements, in first-appearance order (`[1, 2]` from `[3, 1, 2]`); Polars 2.1 can give them in another order (`[2, 1]`).' },
   { id: 'explode', fn: 'explode', df: lists().select('id', 't').explode('t'), polars: `${LISTS}.select('id', 't').explode('t')` },
   { id: 'implode', fn: 'implode', df: lists().select('id', 't').explode('t').groupBy('id', { maintainOrder: true }).agg(col('t').implode()), polars: `${LISTS}.select('id', 't').explode('t').group_by('id', maintain_order=True).agg(pl.col('t'))` },
   { id: 'struct-field', fn: 'struct.field', df: lists().select(col('pt').struct.field('y')), polars: `${LISTS}.select(pl.col('pt').struct.field('y'))` },

@@ -84,6 +84,27 @@ describe.each(KINDS)('%s', (kind) => {
     await expect(posts().explode('id').collect(db)).rejects.toThrow(/explode: id is int, not a list/);
   });
 
+  it('the list methods of statistics, changes and sets: types, and errors when the plan is built', async () => {
+    const db = await open();
+    const s = col('scores').list;
+    const r = await posts()
+      .select(s.median(), s.std().alias('std'), s.nUnique().alias('nu'), s.argMax().alias('am'), s.countMatches(5).alias('cm'), s.dropNulls().alias('dn'), s.diff().alias('d'), s.gather(col('scores')).alias('g'), s.setUnion(col('scores')).alias('u'))
+      .collect(db);
+    expect(r.types).toEqual(['real', 'real', 'int', 'int', 'int', 'list<int>', 'list<int>', 'list<int>', 'list<int>']);
+    expect(r.rows[0]).toEqual([2, 1, 3, 0, 0, [3, 1, 2], [null, -2, 1], [null, 1, 2], [3, 1, 2]]);
+    const fails = async (e: ReturnType<typeof col>, pattern: RegExp) => expect(posts().select(e).collect(db)).rejects.toThrow(pattern);
+    await fails(col('tags').list.median(), /list\.median: takes a list of numbers/);
+    await fails(col('scores').list.all(), /list\.all: takes a list of bool values/);
+    await fails(col('tags').list.diff(), /list\.diff: takes a list of numbers or durations/);
+    await fails(col('scores').list.gather(col('tags')), /list\.gather: takes a list of whole-number positions/);
+    await fails(col('scores').list.setUnion(col('tags')), /list\.setUnion: takes two lists of one type/);
+    await fails(col('scores').list.countMatches('x'), /list\.countMatches: counts a value of the list's element type/);
+    expect(() => col('scores').list.std(0.5)).toThrow(/list\.std: expected a whole number for ddof, not 0\.5/);
+    expect(() => col('scores').list.sample(1.5)).toThrow(/list\.sample: expected a whole number for n/);
+    await fails(col('scores').list.item(), /list_item: the list has 3 elements, not 1/);
+    await fails(col('scores').list.get(9, { nullOnOob: false }), /list_get: index 9 is out of range for a list of 3/);
+  });
+
   it('a table keeps them: LIST and STRUCT storage', async () => {
     const db = await open();
     await posts().createTable(db, 'posts');

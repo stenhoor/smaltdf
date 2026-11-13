@@ -187,24 +187,47 @@ zone ::= expr-like
 
 list-method ::= list-len | list-get | list-first | list-last | list-contains | list-slice | list-head | list-tail
               | list-concat | list-join | list-sort | list-unique | list-reverse | list-sum | list-mean | list-min
-              | list-max
+              | list-max | list-median | list-std | list-var | list-nUnique | list-argMin | list-argMax
+              | list-countMatches | list-all | list-any | list-dropNulls | list-shift | list-diff | list-gather
+              | list-gatherEvery | list-sample | list-item | list-setUnion | list-setIntersection | list-setDifference
+              | list-setSymmetricDifference
 list-len ::= 'len' '(' ')'
-list-get ::= 'get' '(' expr-like ')'
+list-get ::= 'get' '(' expr-like (',' '{' 'nullOnOob' ':' boolean '}')? ')'
 list-first ::= 'first' '(' ')'
 list-last ::= 'last' '(' ')'
-list-contains ::= 'contains' '(' expr-like ')'
+list-contains ::= 'contains' '(' expr-like (',' '{' 'nullsEqual' ':' boolean '}')? ')'
 list-slice ::= 'slice' '(' expr-like (',' expr-like)? ')'
 list-head ::= 'head' '(' n? ')'
 list-tail ::= 'tail' '(' n? ')'
 list-concat ::= 'concat' '(' expr-like ')'
-list-join ::= 'join' '(' string ')'
-list-sort ::= 'sort' '(' ('{' 'descending' ':' boolean '}')? ')'
+list-join ::= 'join' '(' string (',' '{' 'ignoreNulls' ':' boolean '}')? ')'
+list-sort ::= 'sort' '(' ('{' ('descending' ':' boolean)? (','? 'nullsLast' ':' boolean)? '}')? ')'
 list-unique ::= 'unique' '(' ')'
 list-reverse ::= 'reverse' '(' ')'
 list-sum ::= 'sum' '(' ')'
 list-mean ::= 'mean' '(' ')'
 list-min ::= 'min' '(' ')'
 list-max ::= 'max' '(' ')'
+list-median ::= 'median' '(' ')'
+list-std ::= 'std' '(' n? ')'
+list-var ::= 'var' '(' n? ')'
+list-nUnique ::= 'nUnique' '(' ')'
+list-argMin ::= 'argMin' '(' ')'
+list-argMax ::= 'argMax' '(' ')'
+list-countMatches ::= 'countMatches' '(' expr-like ')'
+list-all ::= 'all' '(' ')'
+list-any ::= 'any' '(' ')'
+list-dropNulls ::= 'dropNulls' '(' ')'
+list-shift ::= 'shift' '(' expr-like? ')'
+list-diff ::= 'diff' '(' n? ')'
+list-gather ::= 'gather' '(' expr-like (',' '{' 'nullOnOob' ':' boolean '}')? ')'
+list-gatherEvery ::= 'gatherEvery' '(' n (',' n)? ')'
+list-sample ::= 'sample' '(' n (',' '{' ('withReplacement' ':' boolean)? (','? 'seed' ':' n)? '}')? ')'
+list-item ::= 'item' '(' ')'
+list-setUnion ::= 'setUnion' '(' expr-like ')'
+list-setIntersection ::= 'setIntersection' '(' expr-like ')'
+list-setDifference ::= 'setDifference' '(' expr-like ')'
+list-setSymmetricDifference ::= 'setSymmetricDifference' '(' expr-like ')'
 struct-field ::= 'field' '(' name ')'
 
 /* Registering smaltdf where the engine runs, so it reads smaltdf's views */

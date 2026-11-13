@@ -30,7 +30,8 @@ A frame with the table's columns and their types, read from the database's catal
 
 ## Notes
 
-- A row table gives its rows in rowid order, a columnar table in the order they were written.
+- A row table gives its rows in rowid order. A columnar table gives them in the order it stores them, which isn't
+  always the order they were written: [`sort`](./sort) for an order to rely on.
 - A view stored by smaltdf, or by another language that gives its column names, reads as a table does ([`createView`](../writing/createView)).
 
 ## Examples

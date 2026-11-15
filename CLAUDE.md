@@ -74,6 +74,10 @@ commit and installs it with `npm install --no-save`. To try an unmerged smaltdb 
 - Mark unfinished work clearly, and open a PR only when CI passes.
 - Read review comments on your PR and answer them with commits that say what they address.
 - When a PR depends on another repo's PR, add a line such as `Depends on: stenhoor/smaltdb#12`.
+- **Ask before adding outside code.** Ask the owner, and wait for a yes, before adding a package (a dependency of any
+  kind, or a pin in `packed.json`), copying or bundling in someone else's code, or loading code from another site at run
+  time (a CDN such as jsDelivr). Say what it is, its licence and size, what it's for, and why our own code can't do it.
+  Outside code that a feature needs goes in a plugin, so it is named and optional, never in core.
 - **Facts only.** Don't tell the owner something you haven't confirmed. A fact comes from the code, a command's
   output, a document you read in this session, or GitHub itself; say which when it isn't obvious. Label everything
   else as an assumption, in those words, with what would confirm it, and check before asserting when checking is
